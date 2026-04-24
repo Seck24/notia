@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form
 from datetime import datetime, timezone
 from app.database import get_db
+from app.services.activity_service import log_activity
 
 router = APIRouter(prefix="/upload", tags=["upload-public"])
 
@@ -65,6 +66,8 @@ async def upload_fichier(token: str, nom_document: str = Form(...), file: Upload
         "fichier_type": file.content_type,
         "uploaded_at": datetime.now(timezone.utc).isoformat(),
     }).eq("dossier_id", dossier_id).eq("cabinet_id", cabinet_id).eq("nom_document", nom_document).execute()
+
+    log_activity(cabinet_id, dossier_id, "document_recu", f"Document '{nom_document}' reçu")
 
     # Increment upload count
     db.table("upload_tokens").update({

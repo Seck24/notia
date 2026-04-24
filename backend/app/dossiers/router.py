@@ -4,6 +4,7 @@ from typing import Optional
 from datetime import datetime
 from app.middleware.auth import get_current_user, get_current_cabinet_id
 from app.database import get_db
+from app.services.activity_service import log_activity
 
 router = APIRouter(prefix="/dossiers", tags=["dossiers"])
 
@@ -35,6 +36,41 @@ class DossierUpdate(BaseModel):
     assigne_a: Optional[str] = None
     notes_internes: Optional[str] = None
     infos_specifiques: Optional[dict] = None
+
+
+@router.get("/dashboard-stats")
+async def dashboard_stats(cabinet_id: str = Depends(get_current_cabinet_id)):
+    db = get_db()
+    all_dossiers = db.table("dossiers").select("id, statut, created_at, updated_at").eq("cabinet_id", cabinet_id).neq("statut", "archive").execute()
+    dossiers = all_dossiers.data or []
+
+    from datetime import datetime
+    now = datetime.now()
+    month_start = now.replace(day=1, hour=0, minute=0, second=0).isoformat()
+
+    en_cours = sum(1 for d in dossiers if d["statut"] != "signature_finale")
+    attente = sum(1 for d in dossiers if d["statut"] == "attente_pieces")
+    redaction = sum(1 for d in dossiers if d["statut"] == "redaction_projet")
+    finalises = sum(1 for d in dossiers if d["statut"] == "signature_finale" and d["created_at"] >= month_start)
+
+    # Urgent: attente_pieces > 7 days
+    urgents = []
+    for d in dossiers:
+        if d["statut"] == "attente_pieces":
+            updated = datetime.fromisoformat(d["updated_at"].replace("Z", "+00:00").replace("+00:00", ""))
+            days = (now - updated.replace(tzinfo=None)).days
+            if days > 7:
+                urgents.append({**d, "jours_attente": days})
+    urgents.sort(key=lambda x: x["jours_attente"], reverse=True)
+
+    # Recent activities
+    activites = db.table("activites").select("*").eq("cabinet_id", cabinet_id).order("created_at", desc=True).limit(10).execute()
+
+    return {
+        "stats": {"en_cours": en_cours, "attente": attente, "redaction": redaction, "finalises": finalises},
+        "urgents": urgents,
+        "activites": activites.data or [],
+    }
 
 
 @router.get("")
@@ -100,6 +136,7 @@ async def create_dossier(body: DossierCreate, user: dict = Depends(get_current_u
         ]
         db.table("documents_dossier").insert(docs).execute()
 
+    log_activity(cabinet_id, result.data[0]["id"], "dossier_cree", f"Dossier {numero} ouvert ({body.type_acte.replace('_',' ')})", user["id"])
     return {"success": True, "dossier": result.data[0]}
 
 
@@ -123,7 +160,8 @@ async def get_dossier(dossier_id: str, cabinet_id: str = Depends(get_current_cab
 
 
 @router.put("/{dossier_id}")
-async def update_dossier(dossier_id: str, body: DossierUpdate, cabinet_id: str = Depends(get_current_cabinet_id)):
+async def update_dossier(dossier_id: str, body: DossierUpdate, user: dict = Depends(get_current_user)):
+    cabinet_id = user["cabinet_id"]
     db = get_db()
     updates = {k: v for k, v in body.model_dump().items() if v is not None}
     if not updates:
@@ -134,6 +172,9 @@ async def update_dossier(dossier_id: str, body: DossierUpdate, cabinet_id: str =
     result = db.table("dossiers").update(updates).eq("id", dossier_id).eq("cabinet_id", cabinet_id).execute()
     if not result.data:
         raise HTTPException(status_code=404, detail="Dossier non trouvé")
+    if "statut" in updates:
+        label = updates["statut"].replace("_", " ")
+        log_activity(cabinet_id, dossier_id, "statut_change", f"Statut passé à {label}", user["id"])
     return {"success": True, "dossier": result.data[0]}
 
 

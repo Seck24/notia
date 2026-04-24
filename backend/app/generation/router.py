@@ -3,6 +3,7 @@ from app.middleware.auth import get_current_user, get_current_cabinet_id
 from app.database import get_db
 from app.services.claude_service import generer_acte, extraire_donnees
 from app.services.rag_service import get_rag_context
+from app.services.activity_service import log_activity
 
 router = APIRouter(tags=["generation"])
 
@@ -58,6 +59,8 @@ async def generer(dossier_id: str, user: dict = Depends(get_current_user)):
 
     # Update dossier status
     db.table("dossiers").update({"statut": "redaction_projet", "updated_at": "now()"}).eq("id", dossier_id).execute()
+
+    log_activity(cabinet_id, dossier_id, "acte_genere", f"Acte v{version} généré ({type_acte.replace('_',' ')})", user["id"])
 
     # Log generation
     db.table("logs_generation").insert({
