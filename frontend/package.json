@@ -15,7 +15,8 @@
     "zustand": "^5.0.12",
     "@supabase/supabase-js": "^2.100.1",
     "lucide-react": "^0.468.0",
-    "axios": "^1.13.6"
+    "axios": "^1.13.6",
+    "react-advanced-cropper": "^0.20.0"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.5.2",
