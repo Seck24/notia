@@ -1,7 +1,7 @@
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 import httpx
-from app.config import SUPABASE_URL
+from app.config import SUPABASE_URL, SUPABASE_ANON_KEY
 from app.database import get_db
 
 security = HTTPBearer()
@@ -12,7 +12,7 @@ async def verify_supabase_jwt(token: str) -> dict:
     async with httpx.AsyncClient() as client:
         resp = await client.get(
             f"{SUPABASE_URL}/auth/v1/user",
-            headers={"Authorization": f"Bearer {token}", "apikey": token},
+            headers={"Authorization": f"Bearer {token}", "apikey": SUPABASE_ANON_KEY},
             timeout=10,
         )
         if resp.status_code != 200:
