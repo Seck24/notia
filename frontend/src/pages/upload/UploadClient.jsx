@@ -117,7 +117,7 @@ export default function UploadClient() {
   if (state === 'loading') {
     return (
       <div className="min-h-screen bg-surface flex flex-col items-center justify-center px-4">
-        <span className="font-display italic text-gold text-3xl font-bold mb-4">N</span>
+        <img src="/logo-notia.jpg" alt="Notia" className="h-12 w-auto mb-4" />
         <Loader2 size={24} className="text-muted animate-spin mb-2" />
         <p className="text-sm text-muted">Vérification du lien...</p>
       </div>
@@ -246,8 +246,7 @@ export default function UploadClient() {
       <div className="max-w-md mx-auto">
         {/* Header */}
         <div className="text-center mb-6">
-          <span className="font-display italic text-gold text-2xl font-bold">N</span>
-          <span className="font-sans font-semibold text-navy text-lg">otia</span>
+          <img src="/logo-notia.jpg" alt="Notia" className="h-10 w-auto mx-auto" />
           {info?.cabinet?.nom && <p className="text-sm text-muted mt-1">{info.cabinet.nom}</p>}
           <p className="text-navy font-medium mt-1">Documents à transmettre</p>
         </div>
