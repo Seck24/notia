@@ -8,6 +8,7 @@ from app.parties.router import router as parties_router
 from app.documents.router import router as documents_router
 from app.upload_public.router import router as upload_router
 from app.generation.router import router as generation_router
+from app.clients.router import router as clients_router
 
 app = FastAPI(title="Notia API", version="2.0.0", description="API de gestion notariale intelligente")
 
@@ -26,6 +27,7 @@ app.include_router(parties_router)
 app.include_router(documents_router)
 app.include_router(upload_router)
 app.include_router(generation_router)
+app.include_router(clients_router)
 
 
 @app.get("/health")
