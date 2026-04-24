@@ -1,27 +1,28 @@
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from jose import jwt, JWTError
-from app.config import SUPABASE_JWT_SECRET, SUPABASE_URL
+import httpx
+from app.config import SUPABASE_URL
 from app.database import get_db
 
 security = HTTPBearer()
 
 
-def verify_supabase_jwt(token: str) -> dict:
-    try:
-        payload = jwt.decode(
-            token,
-            SUPABASE_JWT_SECRET,
-            algorithms=["HS256"],
-            audience="authenticated",
+async def verify_supabase_jwt(token: str) -> dict:
+    """Verify JWT by calling Supabase auth endpoint."""
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(
+            f"{SUPABASE_URL}/auth/v1/user",
+            headers={"Authorization": f"Bearer {token}", "apikey": token},
+            timeout=10,
         )
-        return payload
-    except JWTError as e:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=f"Token invalide: {e}")
+        if resp.status_code != 200:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token invalide")
+        user_data = resp.json()
+        return {"sub": user_data.get("id"), "email": user_data.get("email")}
 
 
 async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
-    payload = verify_supabase_jwt(credentials.credentials)
+    payload = await verify_supabase_jwt(credentials.credentials)
     auth_id = payload.get("sub")
     if not auth_id:
         raise HTTPException(status_code=401, detail="Token sans identifiant")

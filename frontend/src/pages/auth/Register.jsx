@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
+import { Eye, EyeOff } from 'lucide-react'
 import useAuthStore from '../../stores/authStore'
 import Logo from '../../components/layout/Logo'
 
@@ -8,6 +9,7 @@ export default function Register() {
   const { register, login } = useAuthStore()
   const [form, setForm] = useState({ nom_cabinet: '', email: '', password: '', password2: '', ville: 'Abidjan' })
   const [error, setError] = useState('')
+  const [showPwd, setShowPwd] = useState(false)
   const [loading, setLoading] = useState(false)
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
@@ -50,11 +52,16 @@ export default function Register() {
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="block text-xs font-medium text-muted mb-1.5">Mot de passe</label>
-                <input type="password" value={form.password} onChange={e => set('password', e.target.value)} required className="input-field" placeholder="8 car. min" />
+                <div className="relative">
+                  <input type={showPwd ? 'text' : 'password'} value={form.password} onChange={e => set('password', e.target.value)} required className="input-field pr-10" placeholder="8 car. min" />
+                  <button type="button" onClick={() => setShowPwd(!showPwd)} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted hover:text-navy">
+                    {showPwd ? <EyeOff size={14} /> : <Eye size={14} />}
+                  </button>
+                </div>
               </div>
               <div>
                 <label className="block text-xs font-medium text-muted mb-1.5">Confirmer</label>
-                <input type="password" value={form.password2} onChange={e => set('password2', e.target.value)} required className="input-field" placeholder="••••••••" />
+                <input type={showPwd ? 'text' : 'password'} value={form.password2} onChange={e => set('password2', e.target.value)} required className="input-field" placeholder="••••••••" />
               </div>
             </div>
             <div>
