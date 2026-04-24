@@ -1,15 +1,36 @@
 import { useEffect, useState } from 'react'
-import { useParams } from 'react-router-dom'
-import { User, FileText, Info, Plus, Link2, Download, Loader2 } from 'lucide-react'
+import { useParams, Link } from 'react-router-dom'
+import { User, FileText, Plus, Link2, Download, Loader2, Check, Circle, ChevronRight, Eye, Upload, Pencil, Trash2, Landmark, Building2, Users as UsersIcon, Gift, CreditCard, Copy } from 'lucide-react'
 import api from '../../services/api'
 import StatutBadge from '../../components/dossiers/StatutBadge'
+import FormulairePartie from '../../components/parties/FormulairePartie'
 
 const STATUTS = [
-  'reception_client', 'analyse_interne', 'attente_pieces',
-  'demarches_admin', 'redaction_projet', 'observations_client', 'signature_finale',
+  { id: 'reception_client', label: 'Réception client', idx: 0 },
+  { id: 'analyse_interne', label: 'Analyse interne', idx: 1 },
+  { id: 'attente_pieces', label: 'Attente pièces', idx: 2 },
+  { id: 'demarches_admin', label: 'Démarches admin', idx: 3 },
+  { id: 'redaction_projet', label: 'Rédaction projet', idx: 4 },
+  { id: 'observations_client', label: 'Observations client', idx: 5 },
+  { id: 'signature_finale', label: 'Signature finale', idx: 6 },
 ]
 
-const DOC_ICONS = { manquant: '⏳', recu: '📄', valide: '✅', rejete: '❌' }
+const TYPE_ICONS = { vente_immobiliere: Landmark, constitution_sarl: Building2, succession: UsersIcon, donation: Gift, ouverture_credit: CreditCard }
+const DOC_STATUS = { manquant: { icon: '⏳', color: 'text-amber-500' }, recu: { icon: '📄', color: 'text-blue-500' }, valide: { icon: '✅', color: 'text-green-600' }, rejete: { icon: '❌', color: 'text-red-500' } }
+
+function calculerFrais(prix) {
+  if (!prix || prix <= 0) return null
+  const droits = prix * 0.07, taxe = prix * 0.012, fixe = 3000, conserv = 15000
+  let emol
+  if (prix <= 5e6) emol = prix * 0.05
+  else if (prix <= 20e6) emol = 5e6 * 0.05 + (prix - 5e6) * 0.03
+  else if (prix <= 50e6) emol = 5e6 * 0.05 + 15e6 * 0.03 + (prix - 20e6) * 0.02
+  else emol = 5e6 * 0.05 + 15e6 * 0.03 + 30e6 * 0.02 + (prix - 50e6) * 0.01
+  const total = droits + taxe + fixe + conserv + emol + 75000
+  return { droits: Math.round(droits), taxe: Math.round(taxe), fixe, conserv, emol: Math.round(emol), debours: 75000, total: Math.round(total) }
+}
+
+function fmt(n) { return n?.toLocaleString('fr-FR') }
 
 export default function DetailDossier() {
   const { id } = useParams()
@@ -17,166 +38,281 @@ export default function DetailDossier() {
   const [loading, setLoading] = useState(true)
   const [generating, setGenerating] = useState(false)
   const [genResult, setGenResult] = useState(null)
-  const [tab, setTab] = useState('docs')
+  const [notes, setNotes] = useState('')
+  const [savingNotes, setSavingNotes] = useState(false)
+  const [uploadLink, setUploadLink] = useState(null)
+  const [tab, setTab] = useState('main') // mobile
+  const [addingPartie, setAddingPartie] = useState(null)
+  const [valeurBien, setValeurBien] = useState('')
 
   async function load() {
     try {
       const { data: d } = await api.get(`/dossiers/${id}`)
       setData(d)
+      setNotes(d.dossier?.notes_internes || '')
+      setValeurBien(d.dossier?.infos_specifiques?.valeur_bien || '')
     } catch { }
     setLoading(false)
   }
 
   useEffect(() => { load() }, [id])
 
-  async function changerStatut(statut) {
-    await api.put(`/dossiers/${id}`, { statut })
-    load()
+  const dossier = data?.dossier
+  const parties = data?.parties || []
+  const documents = data?.documents || []
+  const actes = data?.actes || []
+  const currentIdx = STATUTS.findIndex(s => s.id === dossier?.statut)
+
+  async function nextStep() {
+    if (currentIdx < STATUTS.length - 1) {
+      await api.put(`/dossiers/${id}`, { statut: STATUTS[currentIdx + 1].id })
+      load()
+    }
+  }
+
+  async function saveNotes() {
+    setSavingNotes(true)
+    await api.put(`/dossiers/${id}`, { notes_internes: notes }).catch(() => {})
+    setSavingNotes(false)
   }
 
   async function genererActe() {
-    setGenerating(true)
-    setGenResult(null)
+    setGenerating(true); setGenResult(null)
     try {
       const { data: r } = await api.post(`/dossiers/${id}/generer`)
-      setGenResult(r)
-      load()
-    } catch (err) {
-      setGenResult({ error: err.response?.data?.detail || 'Erreur de génération' })
-    }
+      setGenResult(r); load()
+    } catch (err) { setGenResult({ error: err.response?.data?.detail || 'Erreur' }) }
     setGenerating(false)
   }
 
-  async function envoyerLienUpload() {
+  async function genUploadLink() {
     try {
       const { data: r } = await api.post(`/dossiers/${id}/upload-link`)
-      const url = `${window.location.origin}/upload/${r.token}`
-      await navigator.clipboard.writeText(url)
-      alert(`Lien copié !\n${url}\n\nValide 72h.`)
-    } catch (err) {
-      alert(err.response?.data?.detail || 'Erreur')
-    }
+      setUploadLink(`${window.location.origin}/upload/${r.token}`)
+    } catch (err) { alert(err.response?.data?.detail || 'Erreur') }
+  }
+
+  async function validerDoc(nom) {
+    await api.post(`/dossiers/${id}/documents/${encodeURIComponent(nom)}/valider`).catch(() => {})
+    load()
+  }
+
+  async function addPartie(data) {
+    await api.post(`/dossiers/${id}/parties`, data)
+    setAddingPartie(null); load()
   }
 
   if (loading) return <p className="text-muted text-center py-12">Chargement...</p>
-  if (!data) return <p className="text-red-500 text-center py-12">Dossier non trouvé</p>
+  if (!dossier) return <p className="text-red-500 text-center py-12">Dossier non trouvé</p>
 
-  const { dossier, parties, documents, actes } = data
   const docsRecus = documents.filter(d => d.statut !== 'manquant').length
   const docsTotal = documents.length
   const pct = docsTotal ? Math.round(docsRecus / docsTotal * 100) : 0
+  const frais = calculerFrais(Number(valeurBien))
+  const TypeIcon = TYPE_ICONS[dossier.type_acte] || FileText
 
   return (
     <div>
-      {/* Header */}
-      <div className="flex flex-wrap items-center gap-3 mb-6">
-        <h1 className="text-xl font-display font-bold text-navy font-mono">{dossier.numero_dossier}</h1>
-        <StatutBadge statut={dossier.statut} />
-        <span className="text-sm text-muted capitalize">{dossier.type_acte?.replace(/_/g, ' ')}</span>
-      </div>
-
       {/* Mobile tabs */}
       <div className="flex md:hidden gap-1 bg-surface rounded-lg p-1 mb-4">
-        {[['parties', 'Parties'], ['docs', 'Documents'], ['infos', 'Infos']].map(([k, l]) => (
+        {[['main', 'Dossier'], ['docs', 'Documents'], ['parties', 'Parties']].map(([k, l]) => (
           <button key={k} onClick={() => setTab(k)} className={`flex-1 py-2 text-xs font-medium rounded-md ${tab === k ? 'bg-white shadow text-navy' : 'text-muted'}`}>{l}</button>
         ))}
       </div>
 
-      {/* 3 panels */}
-      <div className="grid md:grid-cols-[320px_1fr_320px] gap-4">
-        {/* Panel: Parties */}
-        <div className={`card ${tab !== 'parties' ? 'hidden md:block' : ''}`}>
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="font-display font-semibold text-navy flex items-center gap-2"><User size={16} /> Parties</h2>
-          </div>
-          {parties.length === 0 ? (
-            <p className="text-sm text-muted">Aucune partie ajoutée</p>
-          ) : (
-            <div className="space-y-3">
-              {parties.map(p => (
-                <div key={p.id} className="p-3 bg-surface rounded-lg border border-border">
-                  <p className="text-xs text-gold font-semibold uppercase">{p.role}</p>
-                  <p className="text-sm font-medium text-navy">{p.type_partie === 'personne_physique' ? `${p.prenom || ''} ${p.nom || ''}`.trim() : p.raison_sociale}</p>
-                  {p.telephone && <p className="text-xs text-muted">{p.telephone}</p>}
-                </div>
-              ))}
+      <div className="grid md:grid-cols-[280px_1fr] gap-6">
+        {/* LEFT: Info + Timeline */}
+        <div className={`space-y-4 ${tab !== 'main' && tab !== 'docs' ? 'hidden md:block' : 'md:block'}`}>
+          {/* Dossier info */}
+          <div className="card">
+            <p className="font-mono text-lg font-bold text-gold mb-2">{dossier.numero_dossier}</p>
+            <div className="flex items-center gap-2 mb-3">
+              <TypeIcon size={16} className="text-navy" />
+              <StatutBadge statut={dossier.statut} />
             </div>
-          )}
-        </div>
+            <div className="space-y-1.5 text-sm">
+              {dossier.client_id && <p className="text-muted">Client : <Link to={`/clients/${dossier.client_id}`} className="text-gold hover:underline">Voir fiche</Link></p>}
+              <p className="text-muted">Ouvert le {new Date(dossier.created_at).toLocaleDateString('fr-FR')}</p>
+            </div>
+          </div>
 
-        {/* Panel: Documents */}
-        <div className={`card ${tab !== 'docs' ? 'hidden md:block' : ''}`}>
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="font-display font-semibold text-navy flex items-center gap-2"><FileText size={16} /> Documents</h2>
-            <button onClick={envoyerLienUpload} className="btn-secondary text-xs py-1.5 px-3 flex items-center gap-1">
-              <Link2 size={14} /> Lien client
+          {/* Timeline */}
+          <div className="card">
+            <p className="text-xs font-semibold text-muted uppercase mb-4">Progression</p>
+            <div className="space-y-0">
+              {STATUTS.map((s, i) => {
+                const done = i < currentIdx
+                const active = i === currentIdx
+                return (
+                  <div key={s.id} className="flex items-start gap-3 relative">
+                    <div className="flex flex-col items-center">
+                      <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs ${done ? 'bg-success text-white' : active ? 'bg-gold text-white' : 'bg-border text-muted'}`}>
+                        {done ? <Check size={12} /> : <Circle size={10} />}
+                      </div>
+                      {i < STATUTS.length - 1 && <div className={`w-0.5 h-6 ${done ? 'bg-success' : 'bg-border'}`} />}
+                    </div>
+                    <p className={`text-sm pb-4 ${active ? 'font-semibold text-navy' : done ? 'text-muted' : 'text-muted/60'}`}>{s.label}</p>
+                  </div>
+                )
+              })}
+            </div>
+            <button onClick={nextStep} disabled={currentIdx >= STATUTS.length - 1} className="btn-primary w-full text-sm flex items-center justify-center gap-2 disabled:opacity-50">
+              <ChevronRight size={16} /> Étape suivante
             </button>
           </div>
-          <div className="mb-4">
-            <div className="flex items-center justify-between text-xs text-muted mb-1">
-              <span>{docsRecus}/{docsTotal} reçus</span>
-              <span>{pct}%</span>
-            </div>
-            <div className="h-2 bg-border rounded-full overflow-hidden">
-              <div className="h-full bg-success rounded-full transition-all" style={{ width: `${pct}%` }} />
-            </div>
-          </div>
-          <div className="space-y-2">
-            {documents.map(d => (
-              <div key={d.id} className="flex items-center justify-between p-2.5 bg-surface rounded-lg border border-border">
-                <div className="flex items-center gap-2">
-                  <span>{DOC_ICONS[d.statut] || '⏳'}</span>
-                  <span className="text-sm">{d.nom_document}</span>
-                </div>
-                {d.statut === 'recu' && (
-                  <button onClick={() => api.post(`/dossiers/${id}/documents/${d.nom_document}/valider`).then(load)} className="text-xs text-success font-medium hover:underline">Valider</button>
-                )}
-              </div>
-            ))}
-          </div>
         </div>
 
-        {/* Panel: Infos + Generation */}
-        <div className={`space-y-4 ${tab !== 'infos' ? 'hidden md:block' : ''}`}>
-          <div className="card">
-            <h2 className="font-display font-semibold text-navy flex items-center gap-2 mb-3"><Info size={16} /> Infos dossier</h2>
-            <div className="space-y-2">
-              <div>
-                <p className="text-xs text-muted">Statut</p>
-                <select value={dossier.statut} onChange={e => changerStatut(e.target.value)} className="input-field text-sm mt-1">
-                  {STATUTS.map(s => <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>)}
-                </select>
-              </div>
+        {/* RIGHT: Dynamic content */}
+        <div className={`space-y-4 ${tab === 'parties' ? 'hidden md:block' : ''}`}>
+          {/* STEP CONTENT */}
+          {(currentIdx <= 1 || tab === 'main') && (
+            <div className="card">
+              <h2 className="text-lg font-display font-semibold text-navy mb-3">
+                {currentIdx === 0 ? 'Notes de l\'entretien' : currentIdx === 1 ? 'Analyse du dossier' : STATUTS[currentIdx]?.label}
+              </h2>
+              <textarea value={notes} onChange={e => setNotes(e.target.value)} onBlur={saveNotes} className="input-field text-sm" rows={4} placeholder="Notes internes du clerc..." />
+              {savingNotes && <p className="text-xs text-muted mt-1">Enregistrement...</p>}
+
               {dossier.infos_specifiques && Object.keys(dossier.infos_specifiques).length > 0 && (
-                <div className="mt-3 space-y-1">
-                  {Object.entries(dossier.infos_specifiques).map(([k, v]) => (
-                    <div key={k} className="flex justify-between text-sm">
-                      <span className="text-muted capitalize">{k.replace(/_/g, ' ')}</span>
-                      <span className="text-navy font-medium">{String(v)}</span>
+                <div className="mt-4 pt-4 border-t border-border">
+                  <p className="text-xs font-semibold text-muted uppercase mb-2">Informations spécifiques</p>
+                  {Object.entries(dossier.infos_specifiques).filter(([, v]) => v).map(([k, v]) => (
+                    <div key={k} className="flex justify-between text-sm py-1"><span className="text-muted capitalize">{k.replace(/_/g, ' ')}</span><span className="font-medium text-navy">{String(v)}</span></div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* DOCUMENTS — visible steps 2-3 and tab docs */}
+          {(currentIdx >= 2 || tab === 'docs') && (
+            <div className="card">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-lg font-display font-semibold text-navy">Documents</h2>
+                <button onClick={genUploadLink} className="btn-secondary text-xs py-1.5 px-3 flex items-center gap-1"><Link2 size={14} /> Lien client</button>
+              </div>
+
+              {uploadLink && (
+                <div className="mb-4 p-3 bg-gold/5 border border-gold/20 rounded-lg">
+                  <p className="text-xs text-muted mb-1">Lien à envoyer au client (valide 72h)</p>
+                  <div className="flex gap-2">
+                    <input value={uploadLink} readOnly className="input-field text-xs font-mono flex-1" />
+                    <button onClick={() => { navigator.clipboard.writeText(uploadLink); }} className="btn-primary text-xs py-1.5 px-3"><Copy size={14} /></button>
+                  </div>
+                </div>
+              )}
+
+              <div className="mb-3">
+                <div className="flex items-center justify-between text-xs text-muted mb-1"><span>{docsRecus}/{docsTotal} reçus</span><span>{pct}%</span></div>
+                <div className="h-2 bg-border rounded-full overflow-hidden"><div className="h-full bg-success rounded-full transition-all" style={{ width: `${pct}%` }} /></div>
+              </div>
+
+              <div className="space-y-2">
+                {documents.map(d => {
+                  const st = DOC_STATUS[d.statut] || DOC_STATUS.manquant
+                  return (
+                    <div key={d.id} className="flex items-center justify-between p-2.5 bg-surface rounded-lg border border-border">
+                      <div className="flex items-center gap-2">
+                        <span className={st.color}>{st.icon}</span>
+                        <div>
+                          <p className="text-sm">{d.nom_document}</p>
+                          {d.uploaded_at && <p className="text-xs text-muted">Reçu le {new Date(d.uploaded_at).toLocaleDateString('fr-FR')}</p>}
+                        </div>
+                      </div>
+                      <div className="flex gap-1">
+                        {d.statut === 'recu' && <button onClick={() => validerDoc(d.nom_document)} className="text-xs text-success font-medium hover:underline px-2">Valider</button>}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* GENERATION — visible step 4+ */}
+          {currentIdx >= 4 && (
+            <div className="card">
+              <h2 className="text-lg font-display font-semibold text-navy mb-4">Génération d'acte</h2>
+
+              {/* Calcul frais */}
+              {dossier.type_acte === 'vente_immobiliere' && (
+                <div className="mb-4 p-4 bg-surface rounded-lg border border-border">
+                  <p className="text-xs font-semibold text-muted uppercase mb-2">Calcul des frais notariaux</p>
+                  <div className="mb-3">
+                    <label className="block text-xs font-medium text-muted mb-1">Valeur du bien (FCFA)</label>
+                    <input type="number" value={valeurBien} onChange={e => setValeurBien(e.target.value)} className="input-field" placeholder="50 000 000" />
+                  </div>
+                  {frais && (
+                    <div className="space-y-1 text-sm">
+                      <div className="flex justify-between"><span className="text-muted">Émoluments</span><span>{fmt(frais.emol)} FCFA</span></div>
+                      <div className="flex justify-between"><span className="text-muted">Droits enregistrement (7%)</span><span>{fmt(frais.droits)} FCFA</span></div>
+                      <div className="flex justify-between"><span className="text-muted">Taxe publicité (1.2%)</span><span>{fmt(frais.taxe)} FCFA</span></div>
+                      <div className="flex justify-between"><span className="text-muted">Conservation foncière</span><span>{fmt(frais.conserv)} FCFA</span></div>
+                      <div className="flex justify-between"><span className="text-muted">Droit fixe + débours</span><span>{fmt(frais.fixe + frais.debours)} FCFA</span></div>
+                      <div className="flex justify-between font-bold text-navy border-t border-border pt-1 mt-1"><span>TOTAL</span><span>{fmt(frais.total)} FCFA</span></div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <button onClick={genererActe} disabled={generating} className="btn-primary w-full py-3 text-base flex items-center justify-center gap-2 disabled:opacity-50">
+                {generating ? <><Loader2 size={18} className="animate-spin" /> Génération en cours (~30s)...</> : '⚡ Générer le projet d\'acte'}
+              </button>
+
+              {genResult?.error && <p className="text-red-500 text-sm mt-3">{genResult.error}</p>}
+              {genResult?.success && (
+                <div className="mt-4 p-4 bg-success/5 border border-success/20 rounded-lg">
+                  <p className="text-success font-semibold mb-2">Projet v{genResult.version} généré</p>
+                  <button className="btn-navy text-sm flex items-center gap-2"><Download size={14} /> Télécharger Word</button>
+                </div>
+              )}
+
+              {actes.length > 0 && (
+                <div className="mt-4">
+                  <p className="text-xs font-semibold text-muted uppercase mb-2">Versions générées</p>
+                  {actes.map(a => (
+                    <div key={a.id} className="flex items-center justify-between p-2 bg-surface rounded-lg text-sm mb-1">
+                      <span>Version {a.version}</span>
+                      <span className="text-xs text-muted">{new Date(a.created_at).toLocaleDateString('fr-FR')}</span>
                     </div>
                   ))}
                 </div>
               )}
             </div>
-          </div>
+          )}
 
-          <div className="card">
-            <h2 className="font-display font-semibold text-navy mb-3">Génération</h2>
-            <button onClick={genererActe} disabled={generating} className="btn-navy w-full flex items-center justify-center gap-2 disabled:opacity-50">
-              {generating ? <><Loader2 size={16} className="animate-spin" /> Génération en cours...</> : 'Générer le projet d\'acte'}
-            </button>
-            {genResult?.error && <p className="text-red-500 text-sm mt-2">{genResult.error}</p>}
-            {genResult?.success && <p className="text-success text-sm mt-2">Acte v{genResult.version} généré</p>}
+          {/* PARTIES — always visible */}
+          <div className={`card ${tab === 'parties' ? '' : tab !== 'main' && tab !== 'docs' ? 'hidden md:block' : ''}`}>
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-lg font-display font-semibold text-navy">Parties du dossier</h2>
+              <button onClick={() => setAddingPartie('vendeur')} className="text-xs text-gold font-medium flex items-center gap-1"><Plus size={14} /> Ajouter</button>
+            </div>
 
-            {actes.length > 0 && (
-              <div className="mt-4 space-y-2">
-                <p className="text-xs text-muted font-medium">Versions générées</p>
-                {actes.map(a => (
-                  <div key={a.id} className="flex items-center justify-between p-2 bg-surface rounded-lg text-sm">
-                    <span>Version {a.version}</span>
-                    <span className="text-xs text-muted">{new Date(a.created_at).toLocaleDateString('fr-FR')}</span>
-                  </div>
-                ))}
+            {addingPartie && (
+              <div className="mb-4 p-4 border border-gold rounded-lg">
+                <FormulairePartie role={addingPartie} onSave={addPartie} onCancel={() => setAddingPartie(null)} />
+              </div>
+            )}
+
+            {parties.length === 0 ? (
+              <p className="text-sm text-muted">Aucune partie</p>
+            ) : (
+              <div className="space-y-2">
+                {parties.map(p => {
+                  const name = p.type_partie === 'personne_physique' ? `${p.prenom || ''} ${p.nom || ''}`.trim() : p.raison_sociale
+                  return (
+                    <div key={p.id} className="flex items-center justify-between p-3 bg-surface rounded-lg border border-border">
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-full bg-navy/10 flex items-center justify-center text-navy text-xs font-bold">{(name || '?')[0]?.toUpperCase()}</div>
+                        <div>
+                          <p className="text-sm font-medium text-navy">{name || '—'}</p>
+                          <p className="text-xs text-gold capitalize">{p.role?.replace(/_/g, ' ')}</p>
+                        </div>
+                      </div>
+                      {p.telephone && <p className="text-xs text-muted hidden sm:block">{p.telephone}</p>}
+                    </div>
+                  )
+                })}
               </div>
             )}
           </div>
