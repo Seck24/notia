@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { User, FileText, Plus, Link2, Download, Loader2, Check, Circle, ChevronRight, Eye, Upload, Pencil, Trash2, Landmark, Building2, Users as UsersIcon, Gift, CreditCard, Copy } from 'lucide-react'
+import { User, FileText, Plus, Link2, Download, Loader2, Check, Circle, ChevronRight, Eye, Upload, Pencil, Trash2, Landmark, Building2, Users as UsersIcon, Gift, CreditCard, Copy, AlertTriangle } from 'lucide-react'
 import api from '../../services/api'
+import useAuthStore from '../../stores/authStore'
 import StatutBadge from '../../components/dossiers/StatutBadge'
 import FormulairePartie from '../../components/parties/FormulairePartie'
 
@@ -34,6 +35,7 @@ function fmt(n) { return n?.toLocaleString('fr-FR') }
 
 export default function DetailDossier() {
   const { id } = useParams()
+  const { user } = useAuthStore()
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [generating, setGenerating] = useState(false)
@@ -234,6 +236,17 @@ export default function DetailDossier() {
             <div className="card">
               <h2 className="text-lg font-display font-semibold text-navy mb-4">Génération d'acte</h2>
 
+              {/* Readiness check */}
+              <div className="mb-4 space-y-1.5">
+                <div className="flex items-center gap-2 text-sm">{parties.length > 0 ? <Check size={14} className="text-success" /> : <AlertTriangle size={14} className="text-amber-500" />}<span>Parties renseignées : {parties.length}</span></div>
+                <div className="flex items-center gap-2 text-sm">{docsRecus > 0 ? <Check size={14} className="text-success" /> : <span className="text-muted text-xs">○</span>}<span>Documents reçus : {docsRecus}/{docsTotal}</span></div>
+                {dossier.infos_specifiques?.regime_matrimonial ? (
+                  <div className="flex items-center gap-2 text-sm"><Check size={14} className="text-success" /><span>Régime matrimonial renseigné</span></div>
+                ) : dossier.type_acte === 'vente_immobiliere' && (
+                  <div className="flex items-center gap-2 text-sm"><AlertTriangle size={14} className="text-amber-500" /><span className="text-amber-600">Régime matrimonial non renseigné</span></div>
+                )}
+              </div>
+
               {/* Calcul frais */}
               {dossier.type_acte === 'vente_immobiliere' && (
                 <div className="mb-4 p-4 bg-surface rounded-lg border border-border">
@@ -255,25 +268,64 @@ export default function DetailDossier() {
                 </div>
               )}
 
-              <button onClick={genererActe} disabled={generating} className="btn-primary w-full py-3 text-base flex items-center justify-center gap-2 disabled:opacity-50">
-                {generating ? <><Loader2 size={18} className="animate-spin" /> Génération en cours (~30s)...</> : '⚡ Générer le projet d\'acte'}
-              </button>
+              {/* Generate button */}
+              {!generating && !genResult?.success && (
+                <button onClick={genererActe} disabled={generating || parties.length === 0} className="btn-primary w-full py-3.5 text-base flex items-center justify-center gap-2 disabled:opacity-50">
+                  ⚡ Générer le projet d'acte
+                </button>
+              )}
 
-              {genResult?.error && <p className="text-red-500 text-sm mt-3">{genResult.error}</p>}
-              {genResult?.success && (
-                <div className="mt-4 p-4 bg-success/5 border border-success/20 rounded-lg">
-                  <p className="text-success font-semibold mb-2">Projet v{genResult.version} généré</p>
-                  <button className="btn-navy text-sm flex items-center gap-2"><Download size={14} /> Télécharger Word</button>
+              {/* Generating state */}
+              {generating && (
+                <div className="text-center py-6">
+                  <Loader2 size={32} className="animate-spin text-gold mx-auto mb-3" />
+                  <p className="text-navy font-semibold">Génération en cours...</p>
+                  <p className="text-sm text-muted mt-1">Analyse du dossier et des obligations légales applicables</p>
+                  <div className="w-48 h-1.5 bg-border rounded-full mx-auto mt-4 overflow-hidden"><div className="h-full bg-gold rounded-full animate-pulse" style={{ width: '60%' }} /></div>
+                  <p className="text-xs text-muted mt-2">Durée estimée : ~30 secondes</p>
                 </div>
               )}
 
+              {/* Error state */}
+              {genResult?.error && (
+                <div className="mt-4 p-4 bg-red-50 border border-red-200 rounded-lg">
+                  <p className="text-red-600 font-semibold mb-1">Erreur lors de la génération</p>
+                  <p className="text-sm text-red-500">{genResult.error}</p>
+                  <button onClick={() => { setGenResult(null); genererActe() }} className="btn-secondary text-sm mt-3">Réessayer</button>
+                </div>
+              )}
+
+              {/* Success state */}
+              {genResult?.success && (
+                <div className="mt-4 p-4 bg-green-50 border border-green-200 rounded-lg">
+                  <p className="text-green-700 font-semibold mb-1">Projet d'acte v{genResult.version} généré</p>
+                  <p className="text-xs text-green-600 mb-3">Par {user?.nom} — {new Date().toLocaleString('fr-FR')}</p>
+                  {genResult.clauses_detectees?.length > 0 && (
+                    <div className="mb-3 text-xs text-green-700"><p className="font-medium mb-1">Clauses incluses :</p>{genResult.clauses_detectees.map((c, i) => <p key={i}>• {c}</p>)}</div>
+                  )}
+                  <div className="flex gap-2">
+                    <a href={`${api.defaults.baseURL}/dossiers/${id}/actes/${genResult.acte_id}/download`} className="btn-navy text-sm flex items-center gap-2 flex-1 justify-center"><Download size={14} /> Word</a>
+                    <a href={`${api.defaults.baseURL}/dossiers/${id}/actes/${genResult.acte_id}/pdf`} className="btn-secondary text-sm flex items-center gap-2 flex-1 justify-center"><Download size={14} /> PDF</a>
+                  </div>
+                  <button onClick={() => { setGenResult(null) }} className="text-sm text-muted hover:underline w-full text-center mt-3">Regénérer une nouvelle version</button>
+                </div>
+              )}
+
+              {/* Version history */}
               {actes.length > 0 && (
                 <div className="mt-4">
-                  <p className="text-xs font-semibold text-muted uppercase mb-2">Versions générées</p>
+                  <p className="text-xs font-semibold text-muted uppercase mb-2">Historique des versions</p>
                   {actes.map(a => (
-                    <div key={a.id} className="flex items-center justify-between p-2 bg-surface rounded-lg text-sm mb-1">
-                      <span>Version {a.version}</span>
-                      <span className="text-xs text-muted">{new Date(a.created_at).toLocaleDateString('fr-FR')}</span>
+                    <div key={a.id} className="flex items-center justify-between p-2.5 bg-surface rounded-lg text-sm mb-1.5">
+                      <div>
+                        <span className="font-medium text-navy">v{a.version}</span>
+                        <span className="text-xs text-muted ml-2">{new Date(a.created_at).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</span>
+                      </div>
+                      <div className="flex gap-1">
+                        <a href={`${api.defaults.baseURL}/dossiers/${id}/actes/${a.id}/download`} className="text-xs text-gold hover:underline">Word</a>
+                        <span className="text-muted">|</span>
+                        <a href={`${api.defaults.baseURL}/dossiers/${id}/actes/${a.id}/pdf`} className="text-xs text-gold hover:underline">PDF</a>
+                      </div>
                     </div>
                   ))}
                 </div>
