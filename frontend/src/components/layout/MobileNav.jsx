@@ -16,7 +16,7 @@ export default function MobileNav() {
   return (
     <div className="md:hidden fixed top-0 left-0 right-0 z-50 bg-navy">
       <div className="flex items-center justify-between px-4 py-3">
-        <Logo size="sm" />
+        <Logo size="sm" dark />
         <button onClick={() => setOpen(!open)} className="text-white">
           {open ? <X size={24} /> : <Menu size={24} />}
         </button>

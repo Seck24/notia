@@ -16,7 +16,7 @@ export default function Sidebar() {
   return (
     <aside className="hidden md:flex flex-col w-60 h-screen bg-navy text-white fixed left-0 top-0 z-40">
       <div className="p-5 border-b border-white/10">
-        <Logo size="md" />
+        <Logo size="md" dark />
       </div>
 
       <nav className="flex-1 py-4">
