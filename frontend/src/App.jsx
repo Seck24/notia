@@ -11,6 +11,7 @@ import ListeDossiers from './pages/dossiers/ListeDossiers'
 import NouveauDossier from './pages/dossiers/NouveauDossier'
 import DetailDossier from './pages/dossiers/DetailDossier'
 import UploadClient from './pages/upload/UploadClient'
+import Configuration from './pages/Configuration'
 
 export default function App() {
   const { initialize } = useAuthStore()
@@ -33,7 +34,7 @@ export default function App() {
           <Route path="/dossiers" element={<ListeDossiers />} />
           <Route path="/dossiers/nouveau" element={<NouveauDossier />} />
           <Route path="/dossiers/:id" element={<DetailDossier />} />
-          <Route path="/configuration" element={<div className="text-muted">Configuration — à venir</div>} />
+          <Route path="/configuration" element={<Configuration />} />
         </Route>
 
         <Route path="*" element={<Navigate to="/dashboard" replace />} />
