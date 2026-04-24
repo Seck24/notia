@@ -25,6 +25,7 @@ def generer_numero(cabinet_id: str, format_str: str, annee: int, seq: int) -> st
 
 class DossierCreate(BaseModel):
     type_acte: str
+    client_id: Optional[str] = None
     notes_internes: Optional[str] = None
     infos_specifiques: Optional[dict] = None
 
@@ -77,6 +78,7 @@ async def create_dossier(body: DossierCreate, user: dict = Depends(get_current_u
         "cabinet_id": cabinet_id,
         "numero_dossier": numero,
         "type_acte": body.type_acte,
+        "client_id": body.client_id,
         "notes_internes": body.notes_internes,
         "infos_specifiques": body.infos_specifiques or {},
         "created_by": user["id"],
