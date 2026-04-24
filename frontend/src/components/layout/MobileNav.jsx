@@ -1,10 +1,11 @@
 import { NavLink } from 'react-router-dom'
-import { LayoutDashboard, FolderOpen, Settings, Menu, X } from 'lucide-react'
+import { LayoutDashboard, Users, FolderOpen, Settings, Menu, X } from 'lucide-react'
 import { useState } from 'react'
 import Logo from './Logo'
 
 const NAV = [
   { to: '/dashboard', icon: LayoutDashboard, label: 'Accueil' },
+  { to: '/clients', icon: Users, label: 'Clients' },
   { to: '/dossiers', icon: FolderOpen, label: 'Dossiers' },
   { to: '/configuration', icon: Settings, label: 'Config' },
 ]

@@ -12,6 +12,8 @@ import NouveauDossier from './pages/dossiers/NouveauDossier'
 import DetailDossier from './pages/dossiers/DetailDossier'
 import UploadClient from './pages/upload/UploadClient'
 import Configuration from './pages/Configuration'
+import ListeClients from './pages/clients/ListeClients'
+import FicheClient from './pages/clients/FicheClient'
 
 export default function App() {
   const { initialize } = useAuthStore()
@@ -31,6 +33,8 @@ export default function App() {
         {/* Protected: App with sidebar */}
         <Route element={<ProtectedRoute><Layout /></ProtectedRoute>}>
           <Route path="/dashboard" element={<Dashboard />} />
+          <Route path="/clients" element={<ListeClients />} />
+          <Route path="/clients/:id" element={<FicheClient />} />
           <Route path="/dossiers" element={<ListeDossiers />} />
           <Route path="/dossiers/nouveau" element={<NouveauDossier />} />
           <Route path="/dossiers/:id" element={<DetailDossier />} />
