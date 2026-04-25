@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from pydantic import BaseModel
 from typing import Optional
 from app.middleware.auth import get_current_user, get_current_cabinet_id
@@ -92,6 +92,51 @@ async def upload_logo(cabinet_id: str, file: UploadFile = File(...), current_cab
         logo_url = f"{SUPABASE_URL}/storage/v1/object/public/documents-cabinets/{path}"
     db.table("cabinets").update({"logo_url": logo_url}).eq("id", cabinet_id).execute()
     return {"success": True, "logo_url": logo_url}
+
+
+@router.post("/{cabinet_id}/modele-acte")
+async def upload_modele_acte(cabinet_id: str, file: UploadFile = File(...), type_acte: str = Form("vente_immobiliere"), current_cabinet: str = Depends(get_current_cabinet_id)):
+    """Upload un modèle d'acte personnalisé pour un type d'acte."""
+    if cabinet_id != current_cabinet:
+        raise HTTPException(status_code=403, detail="Accès refusé")
+    db = get_db()
+    import re, unicodedata
+    safe_name = re.sub(r'[\s]+', '_', unicodedata.normalize('NFKD', type_acte).encode('ascii', 'ignore').decode('ascii'))
+    ext = file.filename.split('.')[-1] if file.filename else 'docx'
+    path = f"{cabinet_id}/modeles/{safe_name}.{ext}"
+    content = await file.read()
+    try:
+        db.storage.from_("documents-cabinets").upload(path, content, {"content-type": file.content_type or "application/octet-stream"})
+    except Exception as e:
+        if "already exists" in str(e).lower() or "Duplicate" in str(e):
+            db.storage.from_("documents-cabinets").update(path, content, {"content-type": file.content_type or "application/octet-stream"})
+        else:
+            raise HTTPException(status_code=500, detail=f"Erreur upload: {e}")
+    return {"success": True, "path": path, "type_acte": type_acte}
+
+
+@router.post("/{cabinet_id}/bareme")
+async def upload_bareme(cabinet_id: str, file: UploadFile = File(...), current_cabinet: str = Depends(get_current_cabinet_id)):
+    """Upload un barème tarifaire personnalisé."""
+    if cabinet_id != current_cabinet:
+        raise HTTPException(status_code=403, detail="Accès refusé")
+    db = get_db()
+    ext = file.filename.split('.')[-1] if file.filename else 'xlsx'
+    path = f"{cabinet_id}/bareme/bareme.{ext}"
+    content = await file.read()
+    try:
+        db.storage.from_("documents-cabinets").upload(path, content, {"content-type": file.content_type or "application/octet-stream"})
+    except Exception as e:
+        if "already exists" in str(e).lower() or "Duplicate" in str(e):
+            db.storage.from_("documents-cabinets").update(path, content, {"content-type": file.content_type or "application/octet-stream"})
+        else:
+            raise HTTPException(status_code=500, detail=f"Erreur upload: {e}")
+    # Save reference in config
+    try:
+        db.table("config_cabinet").update({"bareme": {"path": path, "filename": file.filename}}).eq("cabinet_id", cabinet_id).execute()
+    except Exception:
+        pass
+    return {"success": True, "path": path}
 
 
 @router.post("/{cabinet_id}/parse-format")
