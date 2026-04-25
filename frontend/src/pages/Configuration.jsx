@@ -11,10 +11,11 @@ const TYPES_ACTES = [
   { id: 'ouverture_credit', label: 'Ouverture de crédit' },
 ]
 
-const FORMAT_EXAMPLES = [
-  { format: 'ADE/{ANNEE}/{SEQ:04d}', preview: 'ADE/2026/0001' },
-  { format: '{ANNEE}-{SEQ:04d}', preview: '2026-0001' },
-  { format: '{ID}/{ANNEE}/{SEQ:04d}', preview: 'MON-CAB/2026/0001' },
+const FORMAT_EXEMPLES = [
+  'ADE/2026/0001',
+  '2026-0001',
+  'DOS-2026-0001',
+  'N°0001/2026',
 ]
 
 const ROLE_BADGES = {
@@ -35,6 +36,9 @@ export default function Configuration() {
 
   // Section 2: Numérotation
   const [format, setFormat] = useState('')
+  const [formatExemple, setFormatExemple] = useState('')
+  const [formatPreview, setFormatPreview] = useState('')
+  const [compteurDepart, setCompteurDepart] = useState('')
   const [savingFormat, setSavingFormat] = useState(false)
   const [savedFormat, setSavedFormat] = useState(false)
 
@@ -60,6 +64,7 @@ export default function Configuration() {
     }
     if (config) {
       setFormat(config.format_numero || '{ANNEE}/{SEQ:04d}')
+      setCompteurDepart(config.compteur?.toString() || '0')
       if (config.bareme) setBaremeUploaded(true)
     }
     loadUsers()
@@ -78,10 +83,23 @@ export default function Configuration() {
   }
 
   function previewNumero() {
-    return format
+    return (formatPreview || format
       .replace('{ANNEE}', '2026')
       .replace('{SEQ:04d}', '0001')
-      .replace('{ID}', cabinetId?.split('-')[0]?.toUpperCase() || 'CAB')
+      .replace('{SEQ:03d}', '001')
+      .replace('{SEQ:05d}', '00001')
+      .replace('{SEQ:02d}', '01')
+      .replace('{ID}', cabinetId?.split('-')[0]?.toUpperCase() || 'CAB'))
+  }
+
+  async function parseExemple(exemple) {
+    setFormatExemple(exemple)
+    if (!exemple.trim()) return
+    try {
+      const { data } = await api.post(`/cabinets/${cabinetId}/parse-format`, { exemple })
+      setFormat(data.format)
+      setFormatPreview(data.preview)
+    } catch { }
   }
 
   async function saveIdentite() {
@@ -103,7 +121,9 @@ export default function Configuration() {
   async function saveFormat() {
     setSavingFormat(true); setSavedFormat(false)
     try {
-      await api.put(`/cabinets/${cabinetId}/config`, { format_numero: format })
+      const updates = { format_numero: format }
+      if (compteurDepart) updates.compteur = parseInt(compteurDepart) || 0
+      await api.put(`/cabinets/${cabinetId}/config`, updates)
       setSavedFormat(true)
       await initialize()
       setTimeout(() => setSavedFormat(false), 3000)
@@ -216,26 +236,37 @@ export default function Configuration() {
         </div>
         <div className="space-y-3">
           <div>
-            <label className="block text-xs font-medium text-muted mb-1">Format</label>
-            <input value={format} onChange={e => setFormat(e.target.value)} className="input-field font-mono" />
-          </div>
-          <div className="bg-surface rounded-lg p-3 border border-border">
-            <p className="text-xs text-muted mb-1">Prévisualisation du prochain numéro</p>
-            <p className="font-mono text-navy font-semibold text-lg">{previewNumero()}</p>
+            <label className="block text-xs font-medium text-muted mb-1">Tapez un exemple de numéro de dossier</label>
+            <input value={formatExemple} onChange={e => parseExemple(e.target.value)} className="input-field font-mono" placeholder="Ex: ADE/2026/0001" />
           </div>
           <div className="flex flex-wrap gap-2">
-            {FORMAT_EXAMPLES.map(ex => (
-              <button key={ex.format} onClick={() => setFormat(ex.format)} className={`text-xs px-3 py-1.5 rounded-lg border transition-colors ${format === ex.format ? 'border-gold bg-gold/10 text-gold' : 'border-border text-muted hover:border-gold/50'}`}>
-                {ex.preview}
+            <p className="text-xs text-muted w-full">Exemples courants :</p>
+            {FORMAT_EXEMPLES.map(ex => (
+              <button key={ex} onClick={() => parseExemple(ex)} className={`text-xs px-3 py-1.5 rounded-lg border transition-colors ${formatExemple === ex ? 'border-gold bg-gold/10 text-gold' : 'border-border text-muted hover:border-gold/50'}`}>
+                {ex}
               </button>
             ))}
           </div>
-          <div className="text-xs text-muted space-y-0.5">
-            <p><code className="bg-gray-100 px-1 rounded">{'{ANNEE}'}</code> Année en cours</p>
-            <p><code className="bg-gray-100 px-1 rounded">{'{SEQ:04d}'}</code> Numéro séquentiel (4 chiffres)</p>
-            <p><code className="bg-gray-100 px-1 rounded">{'{ID}'}</code> Identifiant cabinet</p>
+          <div>
+            <label className="block text-xs font-medium text-muted mb-1">Dernier numéro existant (pour reprendre la suite)</label>
+            <input
+              type="number"
+              value={compteurDepart}
+              onChange={e => setCompteurDepart(e.target.value)}
+              className="input-field"
+              placeholder="Ex: 45 (le prochain sera 46)"
+              min="0"
+            />
+            <p className="text-xs text-muted mt-1">Si vous avez déjà 45 dossiers, tapez 45. Le prochain sera le n°46.</p>
           </div>
-          <button onClick={saveFormat} disabled={savingFormat} className="btn-primary flex items-center gap-2 disabled:opacity-50">
+          {format && (
+            <div className="bg-surface rounded-lg p-3 border border-border">
+              <p className="text-xs text-muted mb-1">Prochain numéro généré</p>
+              <p className="font-mono text-navy font-semibold text-lg">{previewNumero()}</p>
+              <p className="text-xs text-muted mt-1">L'année et le numéro séquentiel seront mis à jour automatiquement</p>
+            </div>
+          )}
+          <button onClick={saveFormat} disabled={savingFormat || !format} className="btn-primary flex items-center gap-2 disabled:opacity-50">
             {savingFormat ? <Loader2 size={16} className="animate-spin" /> : savedFormat ? <Check size={16} /> : <Save size={16} />}
             {savingFormat ? 'Enregistrement...' : savedFormat ? 'Enregistré' : 'Enregistrer'}
           </button>
