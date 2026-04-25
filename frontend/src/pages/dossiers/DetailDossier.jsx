@@ -36,7 +36,7 @@ function fmt(n) { return n?.toLocaleString('fr-FR') }
 
 export default function DetailDossier() {
   const { id } = useParams()
-  const { user } = useAuthStore()
+  const { user, cabinet } = useAuthStore()
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [generating, setGenerating] = useState(false)
@@ -159,18 +159,19 @@ export default function DetailDossier() {
 
   function getRelanceMessage() {
     const manquants = documents.filter(d => d.statut === 'manquant').map(d => d.nom_document)
-    const cabinetName = dossier?.cabinet_id ? '' : ''
+    const nom = cabinet?.nom || 'votre notaire'
     const lines = [
       `Bonjour,`,
       ``,
-      `Nous vous contactons au sujet de votre dossier.`,
+      `L'étude ${nom} vous contacte au sujet de votre dossier.`,
       `Il nous manque encore ${manquants.length} document${manquants.length > 1 ? 's' : ''} :`,
       ...manquants.map(d => `  - ${d}`),
       ``,
-      `Vous pouvez nous les envoyer facilement via ce lien :`,
+      `Vous pouvez nous les envoyer facilement via ce lien sécurisé :`,
       uploadLink || '',
       ``,
-      `Merci et à bientôt.`,
+      `Cordialement,`,
+      nom,
     ]
     return lines.join('\n')
   }

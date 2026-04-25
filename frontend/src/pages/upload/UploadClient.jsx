@@ -23,6 +23,10 @@ export default function UploadClient() {
         setDocs(data.documents || [])
         const allRecus = (data.documents || []).every(d => d.statut !== 'manquant')
         setState(allRecus ? 'allDone' : 'main')
+        // Set page title to cabinet name for WhatsApp preview
+        if (data.cabinet?.nom) {
+          document.title = `${data.cabinet.nom} — Documents à transmettre`
+        }
       })
       .catch(err => {
         setErrorMsg(err.response?.data?.detail || 'Ce lien est invalide ou a expiré')
