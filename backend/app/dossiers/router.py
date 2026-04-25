@@ -223,57 +223,68 @@ async def creer_depuis_analyse(body: CreerDepuisAnalyse, user: dict = Depends(ge
 
     dossier_id = dossier.data[0]["id"]
 
-    # Create parties + link/create clients (avec reconnaissance)
+    # Create parties + link/create clients (avec reconnaissance + dédoublonnage)
     decisions = {}
     if body.parties_decisions:
         for d in body.parties_decisions:
             decisions[d.get("index", -1)] = d
 
+    # Map pour dédupliquer : "nom_prenom" → client_id (évite de créer 2x le même client)
+    clients_crees = {}
+
     for i, p in enumerate(analyse.get("parties", [])):
         nom = p.get("nom", "")
         prenom = p.get("prenom", "")
         decision = decisions.get(i)
+        dedup_key = f"{nom.lower().strip()}_{prenom.lower().strip()}"
 
-        client_id = None
-        if decision and decision.get("action") == "lier" and decision.get("client_id"):
-            # Utiliser un client existant
-            client_id = decision["client_id"]
-        elif decision and decision.get("action") == "creer":
-            # Créer nouveau client avec infos supplémentaires optionnelles
-            infos = decision.get("infos_supplementaires") or {}
-            new_client = db.table("clients").insert({
-                "cabinet_id": cabinet_id,
-                "type_client": "entreprise" if p.get("type_partie") == "personne_morale" else "particulier",
-                "nom": nom,
-                "prenom": prenom,
-                "situation_matrimoniale": p.get("situation_matrimoniale"),
-                "regime_matrimonial": p.get("regime_matrimonial"),
-                "raison_sociale": p.get("raison_sociale") if p.get("type_partie") == "personne_morale" else None,
-                "forme_juridique": p.get("forme_juridique"),
-                "telephone": infos.get("telephone"),
-                "email": infos.get("email"),
-            }).execute()
-            if new_client.data:
-                client_id = new_client.data[0]["id"]
-        else:
-            # Fallback legacy : chercher ou créer
-            if nom:
-                existing = db.table("clients").select("id").eq("cabinet_id", cabinet_id).ilike("nom", f"%{nom}%").limit(1).execute()
-                if existing.data:
-                    client_id = existing.data[0]["id"]
-                else:
-                    new_client = db.table("clients").insert({
-                        "cabinet_id": cabinet_id,
-                        "type_client": "entreprise" if p.get("type_partie") == "personne_morale" else "particulier",
-                        "nom": nom,
-                        "prenom": prenom,
-                        "situation_matrimoniale": p.get("situation_matrimoniale"),
-                        "regime_matrimonial": p.get("regime_matrimonial"),
-                        "raison_sociale": p.get("raison_sociale") if p.get("type_partie") == "personne_morale" else None,
-                        "forme_juridique": p.get("forme_juridique"),
-                    }).execute()
-                    if new_client.data:
-                        client_id = new_client.data[0]["id"]
+        # Vérifier si ce client a déjà été créé/lié dans ce même dossier
+        client_id = clients_crees.get(dedup_key)
+
+        if not client_id:
+            if decision and decision.get("action") == "lier" and decision.get("client_id"):
+                # Utiliser un client existant
+                client_id = decision["client_id"]
+            elif decision and decision.get("action") == "creer":
+                # Créer nouveau client avec infos supplémentaires optionnelles
+                infos = decision.get("infos_supplementaires") or {}
+                new_client = db.table("clients").insert({
+                    "cabinet_id": cabinet_id,
+                    "type_client": "entreprise" if p.get("type_partie") == "personne_morale" else "particulier",
+                    "nom": nom,
+                    "prenom": prenom,
+                    "situation_matrimoniale": p.get("situation_matrimoniale"),
+                    "regime_matrimonial": p.get("regime_matrimonial"),
+                    "raison_sociale": p.get("raison_sociale") if p.get("type_partie") == "personne_morale" else None,
+                    "forme_juridique": p.get("forme_juridique"),
+                    "telephone": infos.get("telephone"),
+                    "email": infos.get("email"),
+                }).execute()
+                if new_client.data:
+                    client_id = new_client.data[0]["id"]
+            else:
+                # Fallback legacy : chercher ou créer
+                if nom:
+                    existing = db.table("clients").select("id").eq("cabinet_id", cabinet_id).ilike("nom", f"%{nom}%").limit(1).execute()
+                    if existing.data:
+                        client_id = existing.data[0]["id"]
+                    else:
+                        new_client = db.table("clients").insert({
+                            "cabinet_id": cabinet_id,
+                            "type_client": "entreprise" if p.get("type_partie") == "personne_morale" else "particulier",
+                            "nom": nom,
+                            "prenom": prenom,
+                            "situation_matrimoniale": p.get("situation_matrimoniale"),
+                            "regime_matrimonial": p.get("regime_matrimonial"),
+                            "raison_sociale": p.get("raison_sociale") if p.get("type_partie") == "personne_morale" else None,
+                            "forme_juridique": p.get("forme_juridique"),
+                        }).execute()
+                        if new_client.data:
+                            client_id = new_client.data[0]["id"]
+
+            # Mémoriser pour dédoublonnage
+            if client_id and dedup_key:
+                clients_crees[dedup_key] = client_id
 
         db.table("parties").insert({
             "dossier_id": dossier_id,
