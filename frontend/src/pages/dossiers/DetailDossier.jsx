@@ -43,6 +43,7 @@ export default function DetailDossier() {
   const [genResult, setGenResult] = useState(null)
   const [notes, setNotes] = useState('')
   const [savingNotes, setSavingNotes] = useState(false)
+  const [notesSaved, setNotesSaved] = useState(false)
   const [uploadLink, setUploadLink] = useState(null)
   const [tab, setTab] = useState('main') // mobile
   const [addingPartie, setAddingPartie] = useState(null)
@@ -84,6 +85,8 @@ export default function DetailDossier() {
     setSavingNotes(true)
     await api.put(`/dossiers/${id}`, { notes_internes: notes }).catch(() => {})
     setSavingNotes(false)
+    setNotesSaved(true)
+    setTimeout(() => setNotesSaved(false), 2000)
   }
 
   async function genererActe() {
@@ -230,27 +233,34 @@ export default function DetailDossier() {
               <ChevronRight size={16} /> Étape suivante
             </button>
           </div>
+
+          {/* Notes internes */}
+          <div className="card">
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-xs font-semibold text-muted uppercase">Notes internes</p>
+              {notesSaved && <span className="text-xs text-green-600 flex items-center gap-1"><Check size={12} /> Sauvegardé</span>}
+              {savingNotes && <span className="text-xs text-muted">Enregistrement...</span>}
+            </div>
+            <textarea
+              value={notes}
+              onChange={e => setNotes(e.target.value)}
+              onBlur={saveNotes}
+              className="w-full text-sm rounded-lg border border-border bg-slate-50/50 px-3 py-2.5 focus:outline-none focus:border-gold focus:ring-2 focus:ring-gold/20 resize-y"
+              style={{ minHeight: '120px' }}
+              placeholder="Notes sur ce dossier, observations, points d'attention..."
+            />
+          </div>
         </div>
 
         {/* RIGHT: Dynamic content */}
         <div className={`space-y-4 ${tab === 'parties' ? 'hidden md:block' : ''}`}>
-          {/* STEP CONTENT */}
-          {(currentIdx <= 1 || tab === 'main') && (
+          {/* INFOS SPÉCIFIQUES */}
+          {dossier.infos_specifiques && Object.keys(dossier.infos_specifiques).filter(k => dossier.infos_specifiques[k]).length > 0 && (
             <div className="card">
-              <h2 className="text-lg font-display font-semibold text-navy mb-3">
-                {currentIdx === 0 ? 'Notes de l\'entretien' : currentIdx === 1 ? 'Analyse du dossier' : STATUTS[currentIdx]?.label}
-              </h2>
-              <textarea value={notes} onChange={e => setNotes(e.target.value)} onBlur={saveNotes} className="input-field text-sm" rows={4} placeholder="Notes internes du clerc..." />
-              {savingNotes && <p className="text-xs text-muted mt-1">Enregistrement...</p>}
-
-              {dossier.infos_specifiques && Object.keys(dossier.infos_specifiques).length > 0 && (
-                <div className="mt-4 pt-4 border-t border-border">
-                  <p className="text-xs font-semibold text-muted uppercase mb-2">Informations spécifiques</p>
-                  {Object.entries(dossier.infos_specifiques).filter(([, v]) => v).map(([k, v]) => (
-                    <div key={k} className="flex justify-between text-sm py-1"><span className="text-muted capitalize">{k.replace(/_/g, ' ')}</span><span className="font-medium text-navy">{String(v)}</span></div>
-                  ))}
-                </div>
-              )}
+              <p className="text-xs font-semibold text-muted uppercase mb-2">Informations spécifiques</p>
+              {Object.entries(dossier.infos_specifiques).filter(([, v]) => v).map(([k, v]) => (
+                <div key={k} className="flex justify-between text-sm py-1"><span className="text-muted capitalize">{k.replace(/_/g, ' ')}</span><span className="font-medium text-navy">{String(v)}</span></div>
+              ))}
             </div>
           )}
 
