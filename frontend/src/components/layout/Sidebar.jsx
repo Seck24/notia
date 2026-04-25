@@ -7,11 +7,12 @@ const NAV = [
   { to: '/dashboard', icon: LayoutDashboard, label: 'Tableau de bord' },
   { to: '/clients', icon: Users, label: 'Clients' },
   { to: '/dossiers', icon: FolderOpen, label: 'Dossiers' },
-  { to: '/configuration', icon: Settings, label: 'Configuration' },
+  { to: '/configuration', icon: Settings, label: 'Configuration', adminOnly: true },
 ]
 
 export default function Sidebar() {
   const { user, cabinet, logout } = useAuthStore()
+  const role = user?.role || 'limite'
 
   return (
     <aside className="hidden md:flex flex-col w-60 h-screen bg-navy text-white fixed left-0 top-0 z-40">
@@ -20,7 +21,7 @@ export default function Sidebar() {
       </div>
 
       <nav className="flex-1 py-4">
-        {NAV.map(({ to, icon: Icon, label }) => (
+        {NAV.filter(n => !n.adminOnly || role === 'admin').map(({ to, icon: Icon, label }) => (
           <NavLink
             key={to}
             to={to}

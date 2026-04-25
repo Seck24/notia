@@ -76,9 +76,39 @@ async def get_client(client_id: str, cabinet_id: str = Depends(get_current_cabin
     if not client.data:
         raise HTTPException(status_code=404, detail="Client non trouvé")
 
-    dossiers = db.table("dossiers").select("id, numero_dossier, type_acte, statut, created_at").eq("client_id", client_id).eq("cabinet_id", cabinet_id).order("created_at", desc=True).execute()
+    # Get dossiers where client is client_id principal
+    dossiers_direct = db.table("dossiers").select("id, numero_dossier, type_acte, statut, created_at").eq("client_id", client_id).eq("cabinet_id", cabinet_id).order("created_at", desc=True).execute()
 
-    return {"client": client.data, "dossiers": dossiers.data}
+    # Get dossiers where client is a party (via parties.client_id)
+    parties_links = db.table("parties").select("dossier_id, role").eq("client_id", client_id).execute()
+    party_dossier_ids = {p["dossier_id"]: p["role"] for p in (parties_links.data or [])}
+
+    # Fetch those dossiers not already found
+    direct_ids = {d["id"] for d in (dossiers_direct.data or [])}
+    extra_ids = [did for did in party_dossier_ids if did not in direct_ids]
+
+    all_dossiers = list(dossiers_direct.data or [])
+    if extra_ids:
+        extra = db.table("dossiers").select("id, numero_dossier, type_acte, statut, created_at").eq("cabinet_id", cabinet_id).in_("id", extra_ids).order("created_at", desc=True).execute()
+        all_dossiers.extend(extra.data or [])
+
+    # Enrich each dossier with the client's role and other parties
+    enriched = []
+    for d in all_dossiers:
+        role_in_dossier = party_dossier_ids.get(d["id"])
+        # If not found via parties, check parties table
+        if not role_in_dossier:
+            p = db.table("parties").select("role").eq("dossier_id", d["id"]).eq("client_id", client_id).maybe_single().execute()
+            role_in_dossier = p.data["role"] if p.data else None
+        # Get other parties for context
+        other_parties = db.table("parties").select("nom, prenom, role").eq("dossier_id", d["id"]).neq("client_id", client_id).execute()
+        enriched.append({
+            **d,
+            "role_client": role_in_dossier,
+            "autres_parties": other_parties.data or [],
+        })
+
+    return {"client": client.data, "dossiers": enriched}
 
 
 @router.put("/{client_id}")

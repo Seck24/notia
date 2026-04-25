@@ -2,11 +2,13 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
+from difflib import SequenceMatcher
 import json as _json
 from app.middleware.auth import get_current_user, get_current_cabinet_id
+from app.middleware.permissions import require_permission, require_role, has_permission
 from app.database import get_db
 from app.services.activity_service import log_activity
-from app.services.claude_service import _get_client as get_claude, _claude_call_with_retry, MODEL
+from app.services.claude_service import _get_client as get_claude, _claude_call_with_retry, MODEL_STANDARD
 
 router = APIRouter(prefix="/dossiers", tags=["dossiers"])
 
@@ -46,6 +48,60 @@ class DescriptionAnalyse(BaseModel):
 
 class CreerDepuisAnalyse(BaseModel):
     analyse: dict
+    parties_decisions: Optional[list] = None
+
+
+def _similarity(a: str, b: str) -> float:
+    """Score de similarité entre deux chaînes (0-1)."""
+    if not a or not b:
+        return 0.0
+    return SequenceMatcher(None, a.lower().strip(), b.lower().strip()).ratio()
+
+
+def _rechercher_clients_similaires(db, cabinet_id: str, nom: str, prenom: str) -> list:
+    """Cherche des clients existants similaires dans le cabinet."""
+    if not nom and not prenom:
+        return []
+
+    search_term = nom or prenom
+    results = db.table("clients").select(
+        "id, nom, prenom, situation_matrimoniale, telephone, email, type_client"
+    ).eq("cabinet_id", cabinet_id).or_(
+        f"nom.ilike.%{search_term}%,prenom.ilike.%{search_term}%"
+    ).limit(10).execute()
+
+    # Si rien trouvé avec le nom, essayer avec le prénom
+    if not results.data and prenom and nom:
+        results = db.table("clients").select(
+            "id, nom, prenom, situation_matrimoniale, telephone, email, type_client"
+        ).eq("cabinet_id", cabinet_id).or_(
+            f"nom.ilike.%{prenom}%,prenom.ilike.%{prenom}%"
+        ).limit(10).execute()
+
+    if not results.data:
+        return []
+
+    # Scorer chaque résultat
+    nom_complet = f"{nom} {prenom}".strip()
+    scored = []
+    for c in results.data:
+        c_nom = f"{c.get('nom', '')} {c.get('prenom', '')}".strip()
+        c_nom_rev = f"{c.get('prenom', '')} {c.get('nom', '')}".strip()
+        score = max(_similarity(nom_complet, c_nom), _similarity(nom_complet, c_nom_rev))
+        if score > 0.4:
+            scored.append({
+                "id": c["id"],
+                "nom": c.get("nom", ""),
+                "prenom": c.get("prenom", ""),
+                "situation_matrimoniale": c.get("situation_matrimoniale"),
+                "telephone": c.get("telephone"),
+                "email": c.get("email"),
+                "score": round(score, 2),
+                "confiance": "haute" if score > 0.8 else "moyenne",
+            })
+
+    scored.sort(key=lambda x: x["score"], reverse=True)
+    return scored[:3]
 
 
 ANALYSE_PROMPT = """Tu analyses une description de dossier notarial ivoirien.
@@ -92,7 +148,7 @@ async def analyser_description(body: DescriptionAnalyse, user: dict = Depends(ge
     client = get_claude()
     message = _claude_call_with_retry(
         client,
-        model=MODEL,
+        model=MODEL_STANDARD,
         max_tokens=2000,
         system=ANALYSE_PROMPT,
         messages=[{"role": "user", "content": body.description}],
@@ -107,6 +163,26 @@ async def analyser_description(body: DescriptionAnalyse, user: dict = Depends(ge
         analyse = _json.loads(text)
     except _json.JSONDecodeError:
         raise HTTPException(status_code=422, detail="L'analyse n'a pas pu extraire les informations. Pouvez-vous préciser ?")
+
+    # Enrichir chaque partie avec les clients existants similaires
+    cabinet_id = user["cabinet_id"]
+    db = get_db()
+    for p in analyse.get("parties", []):
+        nom = p.get("nom", "")
+        prenom = p.get("prenom", "")
+        clients_similaires = _rechercher_clients_similaires(db, cabinet_id, nom, prenom)
+
+        if clients_similaires:
+            for c in clients_similaires:
+                parties_count = db.table("parties").select("id", count="exact").eq("client_id", c["id"]).execute()
+                c["nb_dossiers"] = parties_count.count or 0
+
+            best = clients_similaires[0]
+            p["clients_similaires"] = clients_similaires
+            p["action_suggeree"] = "lier" if best["confiance"] == "haute" else "suggerer"
+        else:
+            p["clients_similaires"] = []
+            p["action_suggeree"] = "creer"
 
     return {"success": True, "analyse": analyse}
 
@@ -147,31 +223,57 @@ async def creer_depuis_analyse(body: CreerDepuisAnalyse, user: dict = Depends(ge
 
     dossier_id = dossier.data[0]["id"]
 
-    # Create parties + link/create clients
-    for p in analyse.get("parties", []):
+    # Create parties + link/create clients (avec reconnaissance)
+    decisions = {}
+    if body.parties_decisions:
+        for d in body.parties_decisions:
+            decisions[d.get("index", -1)] = d
+
+    for i, p in enumerate(analyse.get("parties", [])):
         nom = p.get("nom", "")
         prenom = p.get("prenom", "")
+        decision = decisions.get(i)
 
-        # Try to find existing client
         client_id = None
-        if nom:
-            existing = db.table("clients").select("id").eq("cabinet_id", cabinet_id).ilike("nom", f"%{nom}%").limit(1).execute()
-            if existing.data:
-                client_id = existing.data[0]["id"]
-            else:
-                # Create client
-                new_client = db.table("clients").insert({
-                    "cabinet_id": cabinet_id,
-                    "type_client": "entreprise" if p.get("type_partie") == "personne_morale" else "particulier",
-                    "nom": nom,
-                    "prenom": prenom,
-                    "situation_matrimoniale": p.get("situation_matrimoniale"),
-                    "regime_matrimonial": p.get("regime_matrimonial"),
-                    "raison_sociale": p.get("raison_sociale") if p.get("type_partie") == "personne_morale" else None,
-                    "forme_juridique": p.get("forme_juridique"),
-                }).execute()
-                if new_client.data:
-                    client_id = new_client.data[0]["id"]
+        if decision and decision.get("action") == "lier" and decision.get("client_id"):
+            # Utiliser un client existant
+            client_id = decision["client_id"]
+        elif decision and decision.get("action") == "creer":
+            # Créer nouveau client avec infos supplémentaires optionnelles
+            infos = decision.get("infos_supplementaires") or {}
+            new_client = db.table("clients").insert({
+                "cabinet_id": cabinet_id,
+                "type_client": "entreprise" if p.get("type_partie") == "personne_morale" else "particulier",
+                "nom": nom,
+                "prenom": prenom,
+                "situation_matrimoniale": p.get("situation_matrimoniale"),
+                "regime_matrimonial": p.get("regime_matrimonial"),
+                "raison_sociale": p.get("raison_sociale") if p.get("type_partie") == "personne_morale" else None,
+                "forme_juridique": p.get("forme_juridique"),
+                "telephone": infos.get("telephone"),
+                "email": infos.get("email"),
+            }).execute()
+            if new_client.data:
+                client_id = new_client.data[0]["id"]
+        else:
+            # Fallback legacy : chercher ou créer
+            if nom:
+                existing = db.table("clients").select("id").eq("cabinet_id", cabinet_id).ilike("nom", f"%{nom}%").limit(1).execute()
+                if existing.data:
+                    client_id = existing.data[0]["id"]
+                else:
+                    new_client = db.table("clients").insert({
+                        "cabinet_id": cabinet_id,
+                        "type_client": "entreprise" if p.get("type_partie") == "personne_morale" else "particulier",
+                        "nom": nom,
+                        "prenom": prenom,
+                        "situation_matrimoniale": p.get("situation_matrimoniale"),
+                        "regime_matrimonial": p.get("regime_matrimonial"),
+                        "raison_sociale": p.get("raison_sociale") if p.get("type_partie") == "personne_morale" else None,
+                        "forme_juridique": p.get("forme_juridique"),
+                    }).execute()
+                    if new_client.data:
+                        client_id = new_client.data[0]["id"]
 
         db.table("parties").insert({
             "dossier_id": dossier_id,
@@ -203,9 +305,13 @@ async def creer_depuis_analyse(body: CreerDepuisAnalyse, user: dict = Depends(ge
 
 
 @router.get("/dashboard-stats")
-async def dashboard_stats(cabinet_id: str = Depends(get_current_cabinet_id)):
+async def dashboard_stats(user: dict = Depends(get_current_user)):
+    cabinet_id = user["cabinet_id"]
     db = get_db()
-    all_dossiers = db.table("dossiers").select("id, statut, created_at, updated_at").eq("cabinet_id", cabinet_id).neq("statut", "archive").execute()
+    query = db.table("dossiers").select("id, statut, created_at, updated_at, numero_dossier, type_acte").eq("cabinet_id", cabinet_id).neq("statut", "archive")
+    if user.get("role") == "limite":
+        query = query.eq("assigne_a", user["id"])
+    all_dossiers = query.execute()
     dossiers = all_dossiers.data or []
 
     from datetime import datetime
@@ -227,13 +333,27 @@ async def dashboard_stats(cabinet_id: str = Depends(get_current_cabinet_id)):
                 urgents.append({**d, "jours_attente": days})
     urgents.sort(key=lambda x: x["jours_attente"], reverse=True)
 
-    # Recent activities
-    activites = db.table("activites").select("*").eq("cabinet_id", cabinet_id).order("created_at", desc=True).limit(10).execute()
+    # Recent activities — enrich with dossier info via JOIN
+    activites = db.table("activites").select("*, dossiers(numero_dossier, type_acte, parties(nom, prenom, role))").eq("cabinet_id", cabinet_id).order("created_at", desc=True).limit(10).execute()
+
+    # Flatten dossier info into each activity
+    enriched_activites = []
+    for a in (activites.data or []):
+        entry = {k: v for k, v in a.items() if k != "dossiers"}
+        dos = a.get("dossiers")
+        if dos:
+            entry["dossier_numero"] = entry.get("dossier_numero") or dos.get("numero_dossier")
+            entry["type_acte"] = dos.get("type_acte")
+            entry["parties"] = dos.get("parties") or []
+        # Clean "(commande IA)" from old descriptions
+        if entry.get("description"):
+            entry["description"] = entry["description"].replace(" (commande IA)", "")
+        enriched_activites.append(entry)
 
     return {
         "stats": {"en_cours": en_cours, "attente": attente, "redaction": redaction, "finalises": finalises},
         "urgents": urgents,
-        "activites": activites.data or [],
+        "activites": enriched_activites,
     }
 
 
@@ -243,10 +363,14 @@ async def list_dossiers(
     type_acte: Optional[str] = Query(None),
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
-    cabinet_id: str = Depends(get_current_cabinet_id),
+    user: dict = Depends(get_current_user),
 ):
+    cabinet_id = user["cabinet_id"]
     db = get_db()
-    query = db.table("dossiers").select("*, utilisateurs!dossiers_assigne_a_fkey(nom, prenom)", count="exact").eq("cabinet_id", cabinet_id).neq("statut", "archive")
+    query = db.table("dossiers").select("*, utilisateurs!dossiers_assigne_a_fkey(nom, prenom), clients(nom, prenom), parties(nom, prenom, role)", count="exact").eq("cabinet_id", cabinet_id).neq("statut", "archive")
+    # Limité: only sees assigned dossiers
+    if user.get("role") == "limite":
+        query = query.eq("assigne_a", user["id"])
     if statut:
         query = query.eq("statut", statut)
     if type_acte:
@@ -401,7 +525,7 @@ Infos: {_json.dumps(dossier.data.get('infos_specifiques', {}), ensure_ascii=Fals
 
     client = get_claude()
     message = _claude_call_with_retry(
-        client, model=MODEL, max_tokens=500,
+        client, model=MODEL_STANDARD, max_tokens=500,
         system=COMMANDE_PROMPT + context,
         messages=[{"role": "user", "content": body.texte}],
     )

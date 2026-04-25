@@ -130,16 +130,25 @@ export default function FicheClient() {
             </div>
           ) : (
             <div className="space-y-3">
-              {dossiers.map(d => (
-                <Link key={d.id} to={`/dossiers/${d.id}`} className="block p-4 bg-surface rounded-lg border border-border hover:border-gold/50 transition-colors">
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="font-mono text-sm font-medium text-navy">{d.numero_dossier}</span>
-                    <StatutBadge statut={d.statut} />
-                  </div>
-                  <p className="text-sm text-muted capitalize">{d.type_acte?.replace(/_/g, ' ')}</p>
-                  <p className="text-xs text-muted mt-1">{new Date(d.created_at).toLocaleDateString('fr-FR')}</p>
-                </Link>
-              ))}
+              {dossiers.map(d => {
+                const others = (d.autres_parties || []).map(p => `${p.prenom || ''} ${p.nom || ''}`.trim()).filter(Boolean)
+                return (
+                  <Link key={d.id} to={`/dossiers/${d.id}`} className="block p-4 bg-surface rounded-lg border border-border hover:border-gold/50 transition-colors">
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="font-mono text-sm font-medium text-navy">{d.numero_dossier}</span>
+                      <StatutBadge statut={d.statut} />
+                    </div>
+                    <p className="text-sm text-muted capitalize">{d.type_acte?.replace(/_/g, ' ')}</p>
+                    {d.role_client && (
+                      <p className="text-xs text-gold font-medium mt-1 capitalize">Rôle : {d.role_client.replace(/_/g, ' ')}</p>
+                    )}
+                    {others.length > 0 && (
+                      <p className="text-xs text-muted mt-0.5">Avec : {others.join(', ')}</p>
+                    )}
+                    <p className="text-xs text-muted mt-1">{new Date(d.created_at).toLocaleDateString('fr-FR')}</p>
+                  </Link>
+                )
+              })}
             </div>
           )}
         </div>

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { User, FileText, Plus, Link2, Download, Loader2, Check, Circle, ChevronRight, Eye, Upload, Pencil, Trash2, Landmark, Building2, Users as UsersIcon, Gift, CreditCard, Copy, AlertTriangle } from 'lucide-react'
+import { User, FileText, Plus, Link2, Download, Loader2, Check, Circle, ChevronRight, Eye, Upload, Pencil, Trash2, Landmark, Building2, Users as UsersIcon, Gift, CreditCard, Copy, AlertTriangle, X, Sparkles } from 'lucide-react'
 import api from '../../services/api'
 import useAuthStore from '../../stores/authStore'
 import StatutBadge from '../../components/dossiers/StatutBadge'
@@ -47,6 +47,13 @@ export default function DetailDossier() {
   const [tab, setTab] = useState('main') // mobile
   const [addingPartie, setAddingPartie] = useState(null)
   const [valeurBien, setValeurBien] = useState('')
+  // Point 3: document management
+  const [uploadingDoc, setUploadingDoc] = useState(null)
+  const [showBulkUpload, setShowBulkUpload] = useState(false)
+  const [bulkFiles, setBulkFiles] = useState([])
+  const [bulkUploading, setBulkUploading] = useState(false)
+  const [previewDoc, setPreviewDoc] = useState(null)
+  const [extractionAlerts, setExtractionAlerts] = useState([])
 
   async function load() {
     try {
@@ -103,6 +110,66 @@ export default function DetailDossier() {
   async function addPartie(data) {
     await api.post(`/dossiers/${id}/parties`, data)
     setAddingPartie(null); load()
+  }
+
+  // Point 3: upload direct depuis checklist
+  async function handleUploadDoc(nomDocument, file) {
+    setUploadingDoc(nomDocument)
+    try {
+      const fd = new FormData()
+      fd.append('nom_document', nomDocument)
+      fd.append('file', file)
+      const { data: result } = await api.post(`/dossiers/${id}/documents/upload`, fd)
+      if (result.extraction?.alertes) {
+        setExtractionAlerts(prev => [...prev, ...result.extraction.alertes.map(a => ({ ...a, nom_document: nomDocument }))])
+      }
+      load()
+    } catch (err) { alert(err.response?.data?.detail || 'Erreur upload') }
+    setUploadingDoc(null)
+  }
+
+  async function handleMarquerRecu(nomDocument) {
+    await api.post(`/dossiers/${id}/documents/${encodeURIComponent(nomDocument)}/marquer-recu`).catch(() => {})
+    load()
+  }
+
+  function suggestDoc(filename) {
+    const name = filename.toLowerCase().replace(/[._-]/g, ' ')
+    const manquants = documents.filter(d => d.statut === 'manquant')
+    for (const doc of manquants) {
+      const words = doc.nom_document.toLowerCase().replace(/[._-]/g, ' ').split(' ')
+      if (words.some(w => w.length > 2 && name.includes(w))) return doc.nom_document
+    }
+    return manquants[0]?.nom_document || ''
+  }
+
+  function handleBulkFiles(e) {
+    const files = Array.from(e.target.files)
+    if (!files.length) return
+    setBulkFiles(files.map(f => ({ file: f, nom_document: suggestDoc(f.name) })))
+    setShowBulkUpload(true)
+  }
+
+  async function handleBulkUpload() {
+    setBulkUploading(true)
+    await Promise.all(bulkFiles.filter(f => f.nom_document).map(async ({ file, nom_document }) => {
+      const fd = new FormData()
+      fd.append('nom_document', nom_document)
+      fd.append('file', file)
+      try {
+        const { data: r } = await api.post(`/dossiers/${id}/documents/upload`, fd)
+        if (r.extraction?.alertes) setExtractionAlerts(prev => [...prev, ...r.extraction.alertes.map(a => ({ ...a, nom_document }))])
+      } catch { }
+    }))
+    setBulkUploading(false); setShowBulkUpload(false); setBulkFiles([]); load()
+  }
+
+  async function handlePreview(nomDocument) {
+    try {
+      const { data: r } = await api.post(`/dossiers/${id}/documents/${encodeURIComponent(nomDocument)}/apercu`)
+      const doc = documents.find(d => d.nom_document === nomDocument)
+      setPreviewDoc({ url: r.url, nom_document: nomDocument, type: doc?.fichier_type?.startsWith('image/') ? 'image' : 'pdf' })
+    } catch { alert('Aperçu non disponible') }
   }
 
   if (loading) return <p className="text-muted text-center py-12">Chargement...</p>
@@ -192,7 +259,13 @@ export default function DetailDossier() {
             <div className="card">
               <div className="flex items-center justify-between mb-4">
                 <h2 className="text-lg font-display font-semibold text-navy">Documents</h2>
-                <button onClick={genUploadLink} className="btn-secondary text-xs py-1.5 px-3 flex items-center gap-1"><Link2 size={14} /> Lien client</button>
+                <div className="flex gap-2">
+                  <label className="btn-secondary text-xs py-1.5 px-3 flex items-center gap-1 cursor-pointer">
+                    <Upload size={14} /> Uploader plusieurs
+                    <input type="file" className="hidden" multiple accept="image/*,application/pdf" onChange={handleBulkFiles} />
+                  </label>
+                  <button onClick={genUploadLink} className="btn-secondary text-xs py-1.5 px-3 flex items-center gap-1"><Link2 size={14} /> Lien client</button>
+                </div>
               </div>
 
               {uploadLink && (
@@ -205,6 +278,44 @@ export default function DetailDossier() {
                 </div>
               )}
 
+              {/* Extraction alerts */}
+              {extractionAlerts.length > 0 && (
+                <div className="mb-3 space-y-2">
+                  {extractionAlerts.map((a, i) => (
+                    <div key={i} className="flex items-start gap-2 p-2.5 bg-amber-50 border border-amber-200 rounded-lg text-xs">
+                      <AlertTriangle size={14} className="text-amber-500 mt-0.5 shrink-0" />
+                      <span className="text-amber-700">Le nom sur le document ({a.nom_document}) diffère de la fiche : <b>{a.nom_document_text || a.nom_document}</b> vs <b>{a.nom_fiche}</b></span>
+                      <button onClick={() => setExtractionAlerts(p => p.filter((_, j) => j !== i))} className="text-amber-400 hover:text-amber-600 shrink-0 ml-auto"><X size={12} /></button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Document summary */}
+              {(() => {
+                const manquants = documents.filter(d => d.statut === 'manquant').length
+                if (manquants === 0) return (
+                  <div className="mb-3 p-2.5 bg-green-50 text-green-700 border border-green-200 rounded-lg text-sm flex items-center gap-2">
+                    <Check size={16} /> Dossier complet — tous les documents sont reçus.
+                  </div>
+                )
+                const uploads = documents.filter(d => d.uploaded_at).map(d => new Date(d.uploaded_at)).sort((a, b) => b - a)
+                const last = uploads[0]
+                const days = last ? Math.floor((Date.now() - last) / 86400000) : null
+                if (days !== null && days > 7) return (
+                  <div className="mb-3 p-2.5 bg-amber-50 text-amber-700 border border-amber-200 rounded-lg text-sm flex items-center gap-2">
+                    <AlertTriangle size={16} /> Aucun document reçu depuis {days} jours.
+                    <button onClick={genUploadLink} className="ml-auto text-xs font-medium underline">Relancer le client</button>
+                  </div>
+                )
+                const lastTxt = days === 0 ? "Dernier reçu aujourd'hui." : days === 1 ? 'Dernier reçu hier.' : days !== null ? `Dernier reçu il y a ${days} jours.` : ''
+                return (
+                  <div className="mb-3 p-2.5 bg-blue-50 text-blue-700 border border-blue-200 rounded-lg text-sm flex items-center gap-2">
+                    <FileText size={16} /> {manquants} document{manquants > 1 ? 's' : ''} manquant{manquants > 1 ? 's' : ''}. {lastTxt}
+                  </div>
+                )
+              })()}
+
               <div className="mb-3">
                 <div className="flex items-center justify-between text-xs text-muted mb-1"><span>{docsRecus}/{docsTotal} reçus</span><span>{pct}%</span></div>
                 <div className="h-2 bg-border rounded-full overflow-hidden"><div className="h-full bg-success rounded-full transition-all" style={{ width: `${pct}%` }} /></div>
@@ -214,20 +325,55 @@ export default function DetailDossier() {
                 {documents.map(d => {
                   const st = DOC_STATUS[d.statut] || DOC_STATUS.manquant
                   return (
-                    <div key={d.id} className="flex items-center justify-between p-2.5 bg-surface rounded-lg border border-border">
-                      <div className="flex items-center gap-2">
-                        <span className={st.color}>{st.icon}</span>
-                        <div>
-                          <p className="text-sm">{d.nom_document}</p>
-                          {d.uploaded_at && <p className="text-xs text-muted">Reçu le {new Date(d.uploaded_at).toLocaleDateString('fr-FR')}</p>}
+                    <div key={d.id} className="p-2.5 bg-surface rounded-lg border border-border">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span className={st.color}>{st.icon}</span>
+                          <div>
+                            <p className="text-sm">{d.nom_document}</p>
+                            {d.uploaded_at && <p className="text-xs text-muted">Reçu le {new Date(d.uploaded_at).toLocaleDateString('fr-FR')}</p>}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-1">
+                          {(d.statut === 'recu' || d.statut === 'valide') && d.fichier_path && (
+                            <button onClick={() => handlePreview(d.nom_document)} className="text-muted hover:text-navy p-1" title="Aperçu"><Eye size={16} /></button>
+                          )}
+                          {d.statut === 'recu' && <button onClick={() => validerDoc(d.nom_document)} className="text-xs text-success font-medium hover:underline px-2">Valider</button>}
                         </div>
                       </div>
-                      <div className="flex gap-1">
-                        {d.statut === 'recu' && <button onClick={() => validerDoc(d.nom_document)} className="text-xs text-success font-medium hover:underline px-2">Valider</button>}
-                      </div>
+                      {/* Boutons upload + marquer reçu pour documents manquants */}
+                      {d.statut === 'manquant' && (
+                        <div className="flex items-center gap-2 mt-2 pl-6">
+                          <label className={`inline-flex items-center gap-1 text-xs font-medium px-3 py-1.5 rounded-md cursor-pointer transition-colors ${uploadingDoc === d.nom_document ? 'bg-gray-100 text-gray-400' : 'bg-navy/10 text-navy hover:bg-navy/20'}`}>
+                            {uploadingDoc === d.nom_document ? <><Loader2 size={12} className="animate-spin" /> Upload...</> : <><Upload size={12} /> Uploader</>}
+                            <input type="file" className="hidden" accept="image/*,application/pdf" disabled={uploadingDoc === d.nom_document} onChange={e => { if (e.target.files[0]) handleUploadDoc(d.nom_document, e.target.files[0]); e.target.value = '' }} />
+                          </label>
+                          <button onClick={() => handleMarquerRecu(d.nom_document)} className="inline-flex items-center gap-1 text-xs font-medium px-3 py-1.5 rounded-md bg-green-50 text-green-700 hover:bg-green-100 transition-colors">
+                            <Check size={12} /> Marquer reçu
+                          </button>
+                        </div>
+                      )}
                     </div>
                   )
                 })}
+              </div>
+            </div>
+          )}
+
+          {/* Aperçu inline */}
+          {previewDoc && (
+            <div className="card">
+              <div className="flex items-center justify-between mb-3">
+                <h2 className="text-sm font-display font-semibold text-navy">{previewDoc.nom_document}</h2>
+                <button onClick={() => setPreviewDoc(null)} className="text-muted hover:text-navy"><X size={18} /></button>
+              </div>
+              <div className="border border-border rounded-lg overflow-hidden mb-3" style={{ minHeight: 250 }}>
+                {previewDoc.type === 'image' ? <img src={previewDoc.url} alt={previewDoc.nom_document} className="w-full h-auto" /> : <iframe src={previewDoc.url} className="w-full" style={{ height: 400 }} title={previewDoc.nom_document} />}
+              </div>
+              <div className="flex gap-2">
+                <a href={previewDoc.url} download className="btn-secondary text-xs py-1.5 px-3 flex items-center gap-1"><Download size={14} /> Télécharger</a>
+                <button onClick={() => { validerDoc(previewDoc.nom_document); setPreviewDoc(null) }} className="text-xs font-medium px-3 py-1.5 rounded-md bg-green-50 text-green-700 hover:bg-green-100 flex items-center gap-1"><Check size={14} /> Valider</button>
+                <button onClick={() => { api.post(`/dossiers/${id}/documents/${encodeURIComponent(previewDoc.nom_document)}/rejeter`).then(load); setPreviewDoc(null) }} className="text-xs font-medium px-3 py-1.5 rounded-md bg-red-50 text-red-700 hover:bg-red-100 flex items-center gap-1"><X size={14} /> Rejeter</button>
               </div>
             </div>
           )}
@@ -269,11 +415,17 @@ export default function DetailDossier() {
                 </div>
               )}
 
-              {/* Generate button */}
+              {/* Generate button — limité sees "Soumettre au notaire" */}
               {!generating && !genResult?.success && (
-                <button onClick={genererActe} disabled={generating || parties.length === 0} className="btn-primary w-full py-3.5 text-base flex items-center justify-center gap-2 disabled:opacity-50">
-                  ⚡ Générer le projet d'acte
-                </button>
+                user?.role === 'limite' ? (
+                  <button onClick={() => { api.put(`/dossiers/${id}`, { statut: 'redaction_projet' }).then(load) }} disabled={parties.length === 0} className="btn-primary w-full py-3.5 text-base flex items-center justify-center gap-2 disabled:opacity-50">
+                    📋 Soumettre au notaire pour génération
+                  </button>
+                ) : (
+                  <button onClick={genererActe} disabled={generating || parties.length === 0} className="btn-primary w-full py-3.5 text-base flex items-center justify-center gap-2 disabled:opacity-50">
+                    ⚡ Générer le projet d'acte
+                  </button>
+                )
               )}
 
               {/* Generating state */}
@@ -371,6 +523,32 @@ export default function DetailDossier() {
           </div>
         </div>
       </div>
+
+      {/* Modal upload groupé */}
+      {showBulkUpload && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-xl max-w-lg w-full p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-display font-semibold text-navy">Associer {bulkFiles.length} fichier{bulkFiles.length > 1 ? 's' : ''}</h3>
+              <button onClick={() => { setShowBulkUpload(false); setBulkFiles([]) }} className="text-muted hover:text-navy"><X size={18} /></button>
+            </div>
+            <div className="space-y-3 mb-6 max-h-80 overflow-y-auto">
+              {bulkFiles.map((item, i) => (
+                <div key={i} className="flex items-center gap-3">
+                  <span className="text-sm text-muted truncate w-40">{item.file.name}</span>
+                  <select value={item.nom_document} onChange={e => setBulkFiles(prev => prev.map((f, j) => j === i ? { ...f, nom_document: e.target.value } : f))} className="input-field text-sm flex-1">
+                    <option value="">— Choisir —</option>
+                    {documents.filter(d => d.statut === 'manquant').map(d => <option key={d.nom_document} value={d.nom_document}>{d.nom_document}</option>)}
+                  </select>
+                </div>
+              ))}
+            </div>
+            <button onClick={handleBulkUpload} disabled={bulkUploading || bulkFiles.every(f => !f.nom_document)} className="btn-primary w-full flex items-center justify-center gap-2 disabled:opacity-50">
+              {bulkUploading ? <><Loader2 size={16} className="animate-spin" /> Upload en cours...</> : <><Upload size={16} /> Uploader tout</>}
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Barre de commande naturelle */}
       <BarreCommande

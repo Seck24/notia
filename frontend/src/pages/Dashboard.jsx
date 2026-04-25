@@ -4,6 +4,7 @@ import { Plus, FolderOpen, Clock, FileCheck, PenTool, AlertTriangle, FileText, U
 import api from '../services/api'
 import useAuthStore from '../stores/authStore'
 import StatutBadge from '../components/dossiers/StatutBadge'
+import formatParties from '../utils/formatParties'
 
 const INDICATORS = [
   { key: 'en_cours', label: 'En cours', icon: FolderOpen, color: 'text-blue-600 bg-blue-50', link: '/dossiers' },
@@ -42,6 +43,9 @@ export default function Dashboard() {
   const [dossiers, setDossiers] = useState([])
   const [loading, setLoading] = useState(true)
 
+  const role = user?.role || 'limite'
+  const isLimite = role === 'limite'
+
   useEffect(() => {
     async function load() {
       try {
@@ -66,7 +70,9 @@ export default function Dashboard() {
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-display font-bold text-navy">Bonjour {prenom}</h1>
+          <h1 className="text-2xl font-display font-bold text-navy">
+            {isLimite ? 'Mes dossiers' : `Bonjour ${prenom}`}
+          </h1>
           <p className="text-sm text-muted capitalize">{formatDate()}</p>
         </div>
         <Link to="/dossiers/nouveau" className="btn-primary flex items-center gap-2">
@@ -89,8 +95,8 @@ export default function Dashboard() {
         ))}
       </div>
 
-      {/* Urgents */}
-      {urgents.length > 0 && (
+      {/* Urgents — hidden for limité */}
+      {!isLimite && urgents.length > 0 && (
         <div className="card mb-6 border-amber-200 bg-amber-50/30">
           <div className="flex items-center gap-2 mb-3">
             <AlertTriangle size={18} className="text-amber-600" />
@@ -113,35 +119,44 @@ export default function Dashboard() {
       )}
 
       <div className="grid lg:grid-cols-2 gap-6">
-        {/* Recent activity */}
-        <div className="card">
-          <h2 className="text-lg font-display font-semibold text-navy mb-4">Activité récente</h2>
-          {activites.length === 0 ? (
-            <p className="text-sm text-muted py-4 text-center">Aucune activité pour le moment</p>
-          ) : (
-            <div className="space-y-3">
-              {activites.map(a => {
-                const Icon = ACTION_ICONS[a.type_action] || FileText
-                return (
-                  <div key={a.id} className="flex items-start gap-3">
-                    <div className="w-7 h-7 rounded-full bg-surface flex items-center justify-center shrink-0 mt-0.5">
-                      <Icon size={14} className="text-muted" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm text-navy">{a.description}</p>
-                      <p className="text-xs text-muted">{timeAgo(a.created_at)}</p>
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
-          )}
-        </div>
+        {/* Recent activity — hidden for limité */}
+        {!isLimite && (
+          <div className="card">
+            <h2 className="text-lg font-display font-semibold text-navy mb-4">Activité récente</h2>
+            {activites.length === 0 ? (
+              <p className="text-sm text-muted py-4 text-center">Aucune activité pour le moment</p>
+            ) : (
+              <div className="space-y-2">
+                {activites.map(a => {
+                  const Icon = ACTION_ICONS[a.type_action] || FileText
+                  const desc = (a.description || '').replace(/\s*\(commande IA\)/g, '')
+                  const numero = a.dossier_numero || ''
+                  const partiesLabel = formatParties(a.parties, a.type_acte) || a.client_nom || ''
+                  const sub = [numero, partiesLabel].filter(Boolean).join(' · ')
+                  return (
+                    <Link key={a.id} to={a.dossier_id ? `/dossiers/${a.dossier_id}` : '#'} className="flex items-start gap-3 p-2 rounded-lg hover:bg-surface transition-colors">
+                      <div className="w-7 h-7 rounded-full bg-surface flex items-center justify-center shrink-0 mt-0.5">
+                        <Icon size={14} className="text-muted" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm text-navy">{desc}</p>
+                        {sub && <p className="text-xs text-gold font-mono">{sub}</p>}
+                        <p className="text-xs text-muted">{timeAgo(a.created_at)}</p>
+                      </div>
+                    </Link>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Recent dossiers */}
-        <div className="card">
+        <div className={`card ${isLimite ? 'lg:col-span-2' : ''}`}>
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-display font-semibold text-navy">Dossiers récents</h2>
+            <h2 className="text-lg font-display font-semibold text-navy">
+              {isLimite ? 'Mes dossiers récents' : 'Dossiers récents'}
+            </h2>
             <Link to="/dossiers" className="text-xs text-gold font-medium hover:underline">Voir tous</Link>
           </div>
           {loading ? (
@@ -156,18 +171,24 @@ export default function Dashboard() {
             </div>
           ) : (
             <div className="space-y-2">
-              {dossiers.map(d => (
-                <Link key={d.id} to={`/dossiers/${d.id}`} className="flex items-center justify-between p-3 bg-surface rounded-lg border border-border hover:border-gold/50 transition-colors">
-                  <div>
-                    <p className="font-mono text-sm font-medium text-navy">{d.numero_dossier}</p>
-                    <p className="text-xs text-muted capitalize">{d.type_acte?.replace(/_/g, ' ')}</p>
-                  </div>
-                  <div className="text-right">
-                    <StatutBadge statut={d.statut} />
-                    <p className="text-xs text-muted mt-1">{new Date(d.created_at).toLocaleDateString('fr-FR')}</p>
-                  </div>
-                </Link>
-              ))}
+              {dossiers.map(d => {
+                const partiesLabel = formatParties(d.parties, d.type_acte)
+                return (
+                  <Link key={d.id} to={`/dossiers/${d.id}`} className="flex items-center justify-between p-3 bg-surface rounded-lg border border-border hover:border-gold/50 transition-colors">
+                    <div>
+                      <p className="font-mono text-sm font-medium text-navy">{d.numero_dossier}</p>
+                      <p className="text-xs text-muted">
+                        {partiesLabel && <span className="text-navy">{partiesLabel} · </span>}
+                        <span className="capitalize">{d.type_acte?.replace(/_/g, ' ')}</span>
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <StatutBadge statut={d.statut} />
+                      <p className="text-xs text-muted mt-1">{new Date(d.created_at).toLocaleDateString('fr-FR')}</p>
+                    </div>
+                  </Link>
+                )
+              })}
             </div>
           )}
         </div>

@@ -2,16 +2,19 @@ import { NavLink } from 'react-router-dom'
 import { LayoutDashboard, Users, FolderOpen, Settings, Menu, X } from 'lucide-react'
 import { useState } from 'react'
 import Logo from './Logo'
+import useAuthStore from '../../stores/authStore'
 
 const NAV = [
   { to: '/dashboard', icon: LayoutDashboard, label: 'Accueil' },
   { to: '/clients', icon: Users, label: 'Clients' },
   { to: '/dossiers', icon: FolderOpen, label: 'Dossiers' },
-  { to: '/configuration', icon: Settings, label: 'Config' },
+  { to: '/configuration', icon: Settings, label: 'Config', adminOnly: true },
 ]
 
 export default function MobileNav() {
   const [open, setOpen] = useState(false)
+  const { user } = useAuthStore()
+  const role = user?.role || 'limite'
 
   return (
     <div className="md:hidden fixed top-0 left-0 right-0 z-50 bg-navy">
@@ -23,7 +26,7 @@ export default function MobileNav() {
       </div>
       {open && (
         <nav className="border-t border-white/10 pb-2">
-          {NAV.map(({ to, icon: Icon, label }) => (
+          {NAV.filter(n => !n.adminOnly || role === 'admin').map(({ to, icon: Icon, label }) => (
             <NavLink
               key={to}
               to={to}

@@ -10,7 +10,9 @@ from anthropic import Anthropic
 from datetime import date as _date
 
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
-MODEL = "claude-sonnet-4-20250514"
+MODEL = "claude-sonnet-4-20250514"  # legacy alias — prefer MODEL_CRITIQUE / MODEL_STANDARD
+MODEL_CRITIQUE = "claude-sonnet-4-6-20250627"      # Actes, vérification qualité, clauses
+MODEL_STANDARD = "claude-haiku-4-5-20251001"  # Extraction, commandes, résumés
 
 import time
 import logging
@@ -213,6 +215,71 @@ def remplacer_a_completer(texte: str) -> str:
     return texte
 
 
+async def extraire_donnees_document(
+    nom_document: str, file_content: bytes, content_type: str,
+    dossier_id: str, cabinet_id: str,
+) -> dict:
+    """Utilise Claude Vision pour extraire les données d'un document scanné."""
+    import base64
+    client = _get_client()
+    db_module = __import__("app.database", fromlist=["get_db"])
+    db = db_module.get_db()
+
+    nom_lower = nom_document.lower()
+    if any(k in nom_lower for k in ("cni", "carte d'identité", "identité")):
+        doc_type, prompt = "CNI", "Extrais de cette CNI : nom, prenom, numero, date_naissance, date_expiration, nationalite. JSON uniquement."
+    elif "passeport" in nom_lower:
+        doc_type, prompt = "passeport", "Extrais de ce passeport : nom, prenom, numero, date_naissance, date_expiration, nationalite. JSON uniquement."
+    elif any(k in nom_lower for k in ("titre foncier", "tf", "certificat foncier")):
+        doc_type, prompt = "titre_foncier", "Extrais de ce titre foncier : numero_tf, superficie, localisation, proprietaire. JSON uniquement."
+    else:
+        doc_type, prompt = "autre", "Extrais toutes les informations pertinentes de ce document juridique (noms, numéros, dates, montants). JSON uniquement."
+
+    if content_type.startswith("image/"):
+        block = {"type": "image", "source": {"type": "base64", "media_type": content_type, "data": base64.b64encode(file_content).decode()}}
+    elif content_type == "application/pdf":
+        block = {"type": "document", "source": {"type": "base64", "media_type": "application/pdf", "data": base64.b64encode(file_content).decode()}}
+    else:
+        return {"doc_type": doc_type, "extracted": False, "reason": "Type non supporté"}
+
+    msg = _claude_call_with_retry(client, model=MODEL_STANDARD, max_tokens=1500,
+        messages=[{"role": "user", "content": [block, {"type": "text", "text": prompt}]}])
+    text = msg.content[0].text.strip()
+    if text.startswith("```"):
+        text = "\n".join(text.split("\n")[1:-1])
+    try:
+        extracted = json.loads(text)
+    except json.JSONDecodeError:
+        return {"doc_type": doc_type, "extracted": False, "raw": text}
+
+    result = {"doc_type": doc_type, "extracted": True, "data": extracted}
+
+    # Compare identity docs with parties
+    if doc_type in ("CNI", "passeport"):
+        ext_nom = (extracted.get("nom") or "").upper().strip()
+        if ext_nom:
+            parties = db.table("parties_dossier").select("nom, prenom, role").eq("dossier_id", dossier_id).execute()
+            mismatches = [{"role": p["role"], "nom_fiche": f"{p.get('prenom', '')} {p.get('nom', '')}".strip(),
+                           "nom_document": f"{extracted.get('prenom', '')} {ext_nom}".strip()}
+                          for p in parties.data if (p.get("nom") or "").upper().strip() and (p.get("nom") or "").upper().strip() != ext_nom]
+            if mismatches:
+                result["alertes"] = mismatches
+
+    # Auto-fill titre foncier data
+    if doc_type == "titre_foncier":
+        try:
+            dos = db.table("dossiers").select("infos_specifiques").eq("id", dossier_id).maybe_single().execute()
+            if dos.data:
+                infos = dos.data.get("infos_specifiques") or {}
+                if extracted.get("numero_tf"): infos["numero_titre_foncier"] = extracted["numero_tf"]
+                if extracted.get("superficie"): infos["superficie"] = extracted["superficie"]
+                db.table("dossiers").update({"infos_specifiques": infos}).eq("id", dossier_id).execute()
+        except Exception as e:
+            _logger.warning("Mise à jour infos TF échouée: %s", e)
+
+    return result
+
+
 async def extraire_donnees(type_acte: str, form_data: dict) -> dict:
     """
     Extrait et structure les données du formulaire via Claude.
@@ -233,8 +300,8 @@ Si des informations semblent manquantes ou incohérentes, signale-les.
 
 Réponds UNIQUEMENT avec le JSON structuré, sans texte autour."""
 
-    message = _claude_call_with_retry(client, 
-        model=MODEL,
+    message = _claude_call_with_retry(client,
+        model=MODEL_STANDARD,
         max_tokens=2000,
         messages=[{"role": "user", "content": prompt}],
     )
@@ -355,8 +422,8 @@ Données structurées :
 Rédige l'acte complet, prêt à être converti en document Word.
 RAPPEL : Aucun symbole markdown. Utiliser ____ pour les champs manquants."""
 
-    message = _claude_call_with_retry(client, 
-        model=MODEL,
+    message = _claude_call_with_retry(client,
+        model=MODEL_CRITIQUE,
         max_tokens=4000,
         system=system_prompt,
         messages=[{"role": "user", "content": user_prompt}],
@@ -423,8 +490,8 @@ Structure obligatoire :
 
 RAPPEL : Aucun symbole markdown. ____ pour les champs manquants."""
 
-    message = _claude_call_with_retry(client, 
-        model=MODEL,
+    message = _claude_call_with_retry(client,
+        model=MODEL_CRITIQUE,
         max_tokens=2000,
         system=system_prompt,
         messages=[{"role": "user", "content": user_prompt}],

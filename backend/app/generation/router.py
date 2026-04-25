@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
 import httpx
 from app.middleware.auth import get_current_user, get_current_cabinet_id
+from app.middleware.permissions import has_permission
 from app.database import get_db
 from app.config import SUPABASE_URL, SUPABASE_SERVICE_KEY
 from app.services.claude_service import generer_acte, extraire_donnees
@@ -33,6 +34,10 @@ def detect_clauses_obligatoires(infos: dict, type_acte: str) -> list[str]:
 
 @router.post("/dossiers/{dossier_id}/generer")
 async def generer(dossier_id: str, user: dict = Depends(get_current_user)):
+    # Limité: cannot generate, must submit to notaire
+    if not has_permission(user.get("role", "limite"), "generer_acte"):
+        raise HTTPException(status_code=403, detail="Soumettez au notaire pour génération")
+
     cabinet_id = user["cabinet_id"]
     db = get_db()
 

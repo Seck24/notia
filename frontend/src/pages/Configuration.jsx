@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Upload, Check, FileText, Calculator, Users, Save, Eye, EyeOff, Building2, Hash, Loader2 } from 'lucide-react'
+import { Upload, Check, FileText, Calculator, Users, Save, Building2, Hash, Loader2, Plus, X, Copy } from 'lucide-react'
 import useAuthStore from '../stores/authStore'
 import api from '../services/api'
 
@@ -17,8 +17,14 @@ const FORMAT_EXAMPLES = [
   { format: '{ID}/{ANNEE}/{SEQ:04d}', preview: 'MON-CAB/2026/0001' },
 ]
 
+const ROLE_BADGES = {
+  admin: 'bg-navy text-white',
+  collaborateur: 'bg-gold/20 text-gold',
+  limite: 'bg-gray-100 text-gray-600',
+}
+
 export default function Configuration() {
-  const { cabinet, config, initialize } = useAuthStore()
+  const { cabinet, config, user, initialize } = useAuthStore()
   const cabinetId = cabinet?.id
 
   // Section 1: Identité
@@ -43,6 +49,10 @@ export default function Configuration() {
   // Section 5: Utilisateurs
   const [users, setUsers] = useState([])
   const [loadingUsers, setLoadingUsers] = useState(true)
+  const [showInvite, setShowInvite] = useState(false)
+  const [inviteForm, setInviteForm] = useState({ prenom: '', nom: '', email: '', role: 'collaborateur' })
+  const [inviting, setInviting] = useState(false)
+  const [inviteResult, setInviteResult] = useState(null)
 
   useEffect(() => {
     if (cabinet) {
@@ -58,9 +68,12 @@ export default function Configuration() {
   async function loadUsers() {
     if (!cabinetId) return
     try {
-      const { data } = await api.get(`/auth/me`)
-      setUsers(data.user ? [data.user] : [])
-    } catch { }
+      const { data } = await api.get('/auth/utilisateurs')
+      setUsers(data.utilisateurs || [])
+    } catch {
+      // Fallback: at least show current user
+      if (user) setUsers([user])
+    }
     setLoadingUsers(false)
   }
 
@@ -72,8 +85,7 @@ export default function Configuration() {
   }
 
   async function saveIdentite() {
-    setSavingIdentite(true)
-    setSavedIdentite(false)
+    setSavingIdentite(true); setSavedIdentite(false)
     try {
       await api.put(`/cabinets/${cabinetId}`, identite)
       if (logoFile) {
@@ -89,8 +101,7 @@ export default function Configuration() {
   }
 
   async function saveFormat() {
-    setSavingFormat(true)
-    setSavedFormat(false)
+    setSavingFormat(true); setSavedFormat(false)
     try {
       await api.put(`/cabinets/${cabinetId}/config`, { format_numero: format })
       setSavedFormat(true)
@@ -120,6 +131,35 @@ export default function Configuration() {
       setBaremeUploaded(true)
     } catch { }
     setUploadingBareme(false)
+  }
+
+  async function handleInvite() {
+    setInviting(true); setInviteResult(null)
+    try {
+      const { data } = await api.post('/auth/utilisateurs/inviter', inviteForm)
+      setInviteResult(data)
+      setInviteForm({ prenom: '', nom: '', email: '', role: 'collaborateur' })
+      loadUsers()
+    } catch (err) {
+      setInviteResult({ error: err.response?.data?.detail || 'Erreur' })
+    }
+    setInviting(false)
+  }
+
+  async function changeRole(userId, newRole) {
+    try {
+      await api.put(`/auth/utilisateurs/${userId}/role`, { role: newRole })
+      loadUsers()
+    } catch { }
+  }
+
+  async function toggleActif(userId) {
+    try {
+      await api.put(`/auth/utilisateurs/${userId}/toggle-actif`)
+      loadUsers()
+    } catch (err) {
+      alert(err.response?.data?.detail || 'Erreur')
+    }
   }
 
   return (
@@ -257,7 +297,57 @@ export default function Configuration() {
             <Users size={18} className="text-gold" />
             <h2 className="text-lg font-display font-semibold text-navy">Utilisateurs</h2>
           </div>
+          <button onClick={() => { setShowInvite(true); setInviteResult(null) }} className="btn-primary text-xs py-1.5 px-3 flex items-center gap-1">
+            <Plus size={14} /> Inviter un collaborateur
+          </button>
         </div>
+
+        {/* Invite modal */}
+        {showInvite && (
+          <div className="mb-4 p-4 border border-gold rounded-lg bg-gold/5">
+            <div className="flex items-center justify-between mb-3">
+              <p className="text-sm font-semibold text-navy">Nouvelle invitation</p>
+              <button onClick={() => setShowInvite(false)} className="text-muted hover:text-navy"><X size={16} /></button>
+            </div>
+            {inviteResult?.success ? (
+              <div className="space-y-3">
+                <p className="text-sm text-green-700">Compte créé pour {inviteResult.email}</p>
+                <div className="p-3 bg-white rounded-lg border border-border text-xs font-mono whitespace-pre-wrap">{inviteResult.invitation_text}</div>
+                <button onClick={() => { navigator.clipboard.writeText(inviteResult.invitation_text); }} className="btn-secondary text-xs py-1.5 px-3 flex items-center gap-1"><Copy size={14} /> Copier l'invitation</button>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-muted mb-1">Prénom *</label>
+                    <input value={inviteForm.prenom} onChange={e => setInviteForm(f => ({ ...f, prenom: e.target.value }))} className="input-field" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-muted mb-1">Nom *</label>
+                    <input value={inviteForm.nom} onChange={e => setInviteForm(f => ({ ...f, nom: e.target.value }))} className="input-field" />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-muted mb-1">Email *</label>
+                  <input type="email" value={inviteForm.email} onChange={e => setInviteForm(f => ({ ...f, email: e.target.value }))} className="input-field" />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-muted mb-1">Rôle</label>
+                  <select value={inviteForm.role} onChange={e => setInviteForm(f => ({ ...f, role: e.target.value }))} className="input-field">
+                    <option value="collaborateur">Collaborateur — accès complet aux dossiers</option>
+                    <option value="limite">Limité — accès restreint à ses dossiers</option>
+                  </select>
+                </div>
+                {inviteResult?.error && <p className="text-red-500 text-xs">{inviteResult.error}</p>}
+                <button onClick={handleInvite} disabled={inviting || !inviteForm.nom || !inviteForm.email} className="btn-primary flex items-center gap-2 disabled:opacity-50">
+                  {inviting ? <Loader2 size={16} className="animate-spin" /> : <Plus size={16} />}
+                  {inviting ? 'Création...' : 'Envoyer l\'invitation'}
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
         {loadingUsers ? (
           <p className="text-sm text-muted">Chargement...</p>
         ) : (
@@ -269,18 +359,36 @@ export default function Configuration() {
                   <th className="pb-2 font-medium">Email</th>
                   <th className="pb-2 font-medium">Rôle</th>
                   <th className="pb-2 font-medium">Statut</th>
+                  <th className="pb-2 font-medium">Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {users.map(u => (
                   <tr key={u.id} className="border-b border-border/50">
-                    <td className="py-2.5 font-medium text-navy">{u.nom}</td>
+                    <td className="py-2.5 font-medium text-navy">{u.prenom ? `${u.prenom} ${u.nom}` : u.nom}</td>
                     <td className="py-2.5 text-muted">{u.email}</td>
-                    <td className="py-2.5 capitalize">{u.role}</td>
                     <td className="py-2.5">
-                      <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${u.actif ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-600'}`}>
-                        {u.actif ? 'Actif' : 'Inactif'}
+                      {u.id === user?.id ? (
+                        <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${ROLE_BADGES[u.role] || ROLE_BADGES.limite}`}>{u.role}</span>
+                      ) : (
+                        <select value={u.role} onChange={e => changeRole(u.id, e.target.value)} className="text-xs border border-border rounded px-2 py-1">
+                          <option value="admin">Admin</option>
+                          <option value="collaborateur">Collaborateur</option>
+                          <option value="limite">Limité</option>
+                        </select>
+                      )}
+                    </td>
+                    <td className="py-2.5">
+                      <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${u.actif !== false ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-600'}`}>
+                        {u.actif !== false ? 'Actif' : 'Inactif'}
                       </span>
+                    </td>
+                    <td className="py-2.5">
+                      {u.id !== user?.id && (
+                        <button onClick={() => toggleActif(u.id)} className={`text-xs font-medium hover:underline ${u.actif !== false ? 'text-red-500' : 'text-green-600'}`}>
+                          {u.actif !== false ? 'Désactiver' : 'Réactiver'}
+                        </button>
+                      )}
                     </td>
                   </tr>
                 ))}
