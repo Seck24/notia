@@ -554,10 +554,58 @@ export default function DetailDossier() {
       <BarreCommande
         dossierId={id}
         statut={dossier.statut}
-        onActionExecuted={(frontendAction) => {
-          if (frontendAction === 'upload_link') genUploadLink()
-          else if (frontendAction === 'generer') genererActe()
-          else load()
+        onActionExecuted={(frontendAction, donnees, action) => {
+          if (frontendAction === 'upload_link') { genUploadLink(); return }
+          if (frontendAction === 'generer') { genererActe(); return }
+          if (frontendAction === 'relance') { genUploadLink(); return }
+
+          // Mise à jour locale du state sans rechargement
+          if (donnees && Object.keys(donnees).length > 0) {
+            setData(prev => {
+              if (!prev) return prev
+              const updated = { ...prev }
+
+              // Mise à jour statut
+              if (donnees.statut) {
+                updated.dossier = { ...updated.dossier, statut: donnees.statut }
+              }
+
+              // Mise à jour document individuel
+              if (donnees.document && donnees.nouveau_statut) {
+                updated.documents = (updated.documents || []).map(d =>
+                  d.nom_document === donnees.document
+                    ? { ...d, statut: donnees.nouveau_statut, ...(donnees.nouveau_statut === 'recu' ? { uploaded_at: new Date().toISOString() } : {}) }
+                    : d
+                )
+              }
+
+              // Tous documents reçus
+              if (donnees.tous_documents === 'recu') {
+                updated.documents = (updated.documents || []).map(d =>
+                  d.statut === 'manquant' ? { ...d, statut: 'recu', uploaded_at: new Date().toISOString() } : d
+                )
+              }
+
+              // Infos spécifiques
+              if (donnees.infos_specifiques) {
+                updated.dossier = {
+                  ...updated.dossier,
+                  infos_specifiques: { ...(updated.dossier.infos_specifiques || {}), ...donnees.infos_specifiques }
+                }
+              }
+
+              // Notes
+              if (donnees.notes_internes !== undefined) {
+                updated.dossier = { ...updated.dossier, notes_internes: donnees.notes_internes }
+                setNotes(donnees.notes_internes)
+              }
+
+              return updated
+            })
+          } else {
+            // Fallback: recharger si pas de données locales
+            load()
+          }
         }}
       />
     </div>
