@@ -74,6 +74,23 @@ export default function DetailDossier() {
   const actes = data?.actes || []
   const currentIdx = STATUTS.findIndex(s => s.id === dossier?.statut)
 
+  async function downloadActe(acteId, format) {
+    try {
+      const url = format === 'pdf'
+        ? `/dossiers/${id}/actes/${acteId}/pdf`
+        : `/dossiers/${id}/actes/${acteId}/download`
+      const { data } = await api.get(url, { responseType: 'blob' })
+      const blob = new Blob([data])
+      const link = document.createElement('a')
+      link.href = URL.createObjectURL(blob)
+      link.download = format === 'pdf' ? `acte_${acteId}.pdf` : `acte_${acteId}.docx`
+      link.click()
+      URL.revokeObjectURL(link.href)
+    } catch {
+      alert('Erreur lors du téléchargement')
+    }
+  }
+
   async function nextStep() {
     if (currentIdx < STATUTS.length - 1) {
       await api.put(`/dossiers/${id}`, { statut: STATUTS[currentIdx + 1].id })
@@ -467,8 +484,8 @@ export default function DetailDossier() {
                     <div className="mb-3 text-xs text-green-700"><p className="font-medium mb-1">Clauses incluses :</p>{genResult.clauses_detectees.map((c, i) => <p key={i}>• {c}</p>)}</div>
                   )}
                   <div className="flex gap-2">
-                    <a href={`${api.defaults.baseURL}/dossiers/${id}/actes/${genResult.acte_id}/download`} className="btn-navy text-sm flex items-center gap-2 flex-1 justify-center"><Download size={14} /> Word</a>
-                    <a href={`${api.defaults.baseURL}/dossiers/${id}/actes/${genResult.acte_id}/pdf`} className="btn-secondary text-sm flex items-center gap-2 flex-1 justify-center"><Download size={14} /> PDF</a>
+                    <button onClick={() => downloadActe(genResult.acte_id, 'word')} className="btn-navy text-sm flex items-center gap-2 flex-1 justify-center"><Download size={14} /> Word</button>
+                    <button onClick={() => downloadActe(genResult.acte_id, 'pdf')} className="btn-secondary text-sm flex items-center gap-2 flex-1 justify-center"><Download size={14} /> PDF</button>
                   </div>
                   <button onClick={() => { setGenResult(null) }} className="text-sm text-muted hover:underline w-full text-center mt-3">Regénérer une nouvelle version</button>
                 </div>
@@ -485,9 +502,9 @@ export default function DetailDossier() {
                         <span className="text-xs text-muted ml-2">{new Date(a.created_at).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</span>
                       </div>
                       <div className="flex gap-1">
-                        <a href={`${api.defaults.baseURL}/dossiers/${id}/actes/${a.id}/download`} className="text-xs text-gold hover:underline">Word</a>
+                        <button onClick={() => downloadActe(a.id, 'word')} className="text-xs text-gold hover:underline">Word</button>
                         <span className="text-muted">|</span>
-                        <a href={`${api.defaults.baseURL}/dossiers/${id}/actes/${a.id}/pdf`} className="text-xs text-gold hover:underline">PDF</a>
+                        <button onClick={() => downloadActe(a.id, 'pdf')} className="text-xs text-gold hover:underline">PDF</button>
                       </div>
                     </div>
                   ))}
