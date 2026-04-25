@@ -215,6 +215,24 @@ export default function DetailDossier() {
     setBulkUploading(false); setShowBulkUpload(false); setBulkFiles([]); load()
   }
 
+  async function downloadDoc(nomDocument) {
+    try {
+      const { data } = await api.get(`/dossiers/${id}/documents/${encodeURIComponent(nomDocument)}/download`, { responseType: 'blob' })
+      const blob = new Blob([data])
+      const link = document.createElement('a')
+      link.href = URL.createObjectURL(blob)
+      link.download = nomDocument
+      link.click()
+      URL.revokeObjectURL(link.href)
+    } catch { alert('Fichier non disponible') }
+  }
+
+  async function supprimerDoc(nomDocument) {
+    if (!confirm(`Supprimer le fichier "${nomDocument}" et remettre en attente ?`)) return
+    await api.delete(`/dossiers/${id}/documents/${encodeURIComponent(nomDocument)}`).catch(() => {})
+    load()
+  }
+
   async function handlePreview(nomDocument) {
     try {
       const { data: r } = await api.post(`/dossiers/${id}/documents/${encodeURIComponent(nomDocument)}/apercu`)
@@ -354,8 +372,8 @@ export default function DetailDossier() {
             </div>
           )}
 
-          {/* DOCUMENTS — visible steps 2-3 and tab docs */}
-          {(currentIdx >= 2 || tab === 'docs') && (
+          {/* DOCUMENTS — visible dès analyse interne */}
+          {(currentIdx >= 1 || tab === 'docs') && (
             <div className="card">
               <div className="flex items-center justify-between mb-4">
                 <h2 className="text-lg font-display font-semibold text-navy">Documents</h2>
@@ -436,7 +454,11 @@ export default function DetailDossier() {
                         </div>
                         <div className="flex items-center gap-1">
                           {(d.statut === 'recu' || d.statut === 'valide') && d.fichier_path && (
-                            <button onClick={() => handlePreview(d.nom_document)} className="text-muted hover:text-navy p-1" title="Aperçu"><Eye size={16} /></button>
+                            <>
+                              <button onClick={() => handlePreview(d.nom_document)} className="text-muted hover:text-navy p-1" title="Aperçu"><Eye size={16} /></button>
+                              <button onClick={() => downloadDoc(d.nom_document)} className="text-muted hover:text-navy p-1" title="Télécharger"><Download size={16} /></button>
+                              <button onClick={() => supprimerDoc(d.nom_document)} className="text-muted hover:text-red-500 p-1" title="Supprimer"><Trash2 size={14} /></button>
+                            </>
                           )}
                           {d.statut === 'recu' && <button onClick={() => validerDoc(d.nom_document)} className="text-xs text-success font-medium hover:underline px-2">Valider</button>}
                         </div>

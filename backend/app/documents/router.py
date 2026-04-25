@@ -2,10 +2,19 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from pydantic import BaseModel
 from typing import Optional
 import secrets
+import re
+import unicodedata
 import logging
 from datetime import datetime, timedelta, timezone
 from app.middleware.auth import get_current_user, get_current_cabinet_id
 from app.database import get_db
+
+
+def _slugify(text: str) -> str:
+    text = unicodedata.normalize('NFKD', text).encode('ascii', 'ignore').decode('ascii')
+    text = re.sub(r'[^\w\s.-]', '', text)
+    text = re.sub(r'[\s]+', '_', text.strip())
+    return text or 'document'
 
 router = APIRouter(prefix="/dossiers/{dossier_id}", tags=["documents"])
 _logger = logging.getLogger("documents")
@@ -81,7 +90,8 @@ async def upload_document_clerc(
 
     annee = datetime.now().year
     ext = file.filename.split(".")[-1] if file.filename else "jpg"
-    path = f"{cabinet_id}/dossiers/{annee}/{dossier_id}/originaux/{nom_document}.{ext}"
+    safe_name = _slugify(nom_document)
+    path = f"{cabinet_id}/dossiers/{annee}/{dossier_id}/originaux/{safe_name}.{ext}"
     content = await file.read()
 
     try:
@@ -128,6 +138,50 @@ async def get_document_url(dossier_id: str, nom_document: str, user: dict = Depe
         return {"url": result["signedURL"], "nom_document": nom_document}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Erreur aperçu: {e}")
+
+
+@router.get("/documents/{nom_document}/download")
+async def download_document(dossier_id: str, nom_document: str, cabinet_id: str = Depends(get_current_cabinet_id)):
+    """Télécharger un document reçu."""
+    db = get_db()
+    doc = db.table("documents_dossier").select("fichier_path, fichier_type").eq("dossier_id", dossier_id).eq("cabinet_id", cabinet_id).eq("nom_document", nom_document).maybe_single().execute()
+    if not doc.data or not doc.data.get("fichier_path"):
+        raise HTTPException(status_code=404, detail="Fichier non trouvé")
+    try:
+        from fastapi.responses import Response
+        content = db.storage.from_("documents-cabinets").download(doc.data["fichier_path"])
+        ext = doc.data["fichier_path"].split(".")[-1]
+        return Response(
+            content=content,
+            media_type=doc.data.get("fichier_type") or "application/octet-stream",
+            headers={"Content-Disposition": f'attachment; filename="{_slugify(nom_document)}.{ext}"'},
+        )
+    except Exception as e:
+        raise HTTPException(status_code=404, detail=f"Fichier non trouvé: {e}")
+
+
+@router.delete("/documents/{nom_document}")
+async def supprimer_document(dossier_id: str, nom_document: str, user: dict = Depends(get_current_user)):
+    """Supprimer un fichier document et remettre en manquant."""
+    cabinet_id = user["cabinet_id"]
+    db = get_db()
+    doc = db.table("documents_dossier").select("fichier_path").eq("dossier_id", dossier_id).eq("cabinet_id", cabinet_id).eq("nom_document", nom_document).maybe_single().execute()
+    if not doc.data:
+        raise HTTPException(status_code=404, detail="Document non trouvé")
+    if doc.data.get("fichier_path"):
+        try:
+            db.storage.from_("documents-cabinets").remove([doc.data["fichier_path"]])
+        except Exception:
+            pass
+    db.table("documents_dossier").update({
+        "statut": "manquant",
+        "fichier_path": None,
+        "fichier_taille": None,
+        "fichier_type": None,
+        "uploaded_at": None,
+        "valide_par": None,
+    }).eq("dossier_id", dossier_id).eq("cabinet_id", cabinet_id).eq("nom_document", nom_document).execute()
+    return {"success": True}
 
 
 @router.post("/upload-link")
