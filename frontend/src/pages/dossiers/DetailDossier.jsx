@@ -40,6 +40,7 @@ export default function DetailDossier() {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [generating, setGenerating] = useState(false)
+  const [genProgress, setGenProgress] = useState(0)
   const [genResult, setGenResult] = useState(null)
   const [notes, setNotes] = useState('')
   const [savingNotes, setSavingNotes] = useState(false)
@@ -107,12 +108,29 @@ export default function DetailDossier() {
   }
 
   async function genererActe() {
-    setGenerating(true); setGenResult(null)
+    setGenerating(true); setGenResult(null); setGenProgress(0)
+    // Progress animation over ~2 minutes
+    const interval = setInterval(() => {
+      setGenProgress(prev => {
+        if (prev >= 95) { clearInterval(interval); return 95 }
+        return prev + (95 - prev) * 0.02 // Smooth deceleration
+      })
+    }, 1000)
     try {
-      const { data: r } = await api.post(`/dossiers/${id}/generer`)
+      const { data: r } = await api.post(`/dossiers/${id}/generer`, {}, { timeout: 180000 })
+      setGenProgress(100)
       setGenResult(r); load()
     } catch (err) { setGenResult({ error: err.response?.data?.detail || 'Erreur' }) }
+    clearInterval(interval)
     setGenerating(false)
+  }
+
+  async function supprimerActe(acteId) {
+    if (!confirm('Supprimer cette version ?')) return
+    try {
+      await api.delete(`/dossiers/${id}/actes/${acteId}`)
+      load()
+    } catch { alert('Erreur lors de la suppression') }
   }
 
   async function genUploadLink() {
@@ -460,9 +478,16 @@ export default function DetailDossier() {
                 <div className="text-center py-6">
                   <Loader2 size={32} className="animate-spin text-gold mx-auto mb-3" />
                   <p className="text-navy font-semibold">Génération en cours...</p>
-                  <p className="text-sm text-muted mt-1">Analyse du dossier et des obligations légales applicables</p>
-                  <div className="w-48 h-1.5 bg-border rounded-full mx-auto mt-4 overflow-hidden"><div className="h-full bg-gold rounded-full animate-pulse" style={{ width: '60%' }} /></div>
-                  <p className="text-xs text-muted mt-2">Durée estimée : ~30 secondes</p>
+                  <p className="text-sm text-muted mt-1">
+                    {genProgress < 30 ? 'Analyse du dossier et des obligations légales...' :
+                     genProgress < 60 ? 'Rédaction des clauses et articles...' :
+                     genProgress < 85 ? 'Vérification juridique et mise en forme...' :
+                     'Finalisation du projet d\'acte...'}
+                  </p>
+                  <div className="w-64 h-2 bg-border rounded-full mx-auto mt-4 overflow-hidden">
+                    <div className="h-full bg-gold rounded-full transition-all duration-1000 ease-out" style={{ width: `${Math.round(genProgress)}%` }} />
+                  </div>
+                  <p className="text-xs text-muted mt-2">Durée estimée : ~2 minutes</p>
                 </div>
               )}
 
@@ -501,10 +526,11 @@ export default function DetailDossier() {
                         <span className="font-medium text-navy">v{a.version}</span>
                         <span className="text-xs text-muted ml-2">{new Date(a.created_at).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</span>
                       </div>
-                      <div className="flex gap-1">
+                      <div className="flex items-center gap-2">
                         <button onClick={() => downloadActe(a.id, 'word')} className="text-xs text-gold hover:underline">Word</button>
                         <span className="text-muted">|</span>
                         <button onClick={() => downloadActe(a.id, 'pdf')} className="text-xs text-gold hover:underline">PDF</button>
+                        <button onClick={() => supprimerActe(a.id)} className="text-muted hover:text-red-500 transition-colors ml-1" title="Supprimer cette version"><Trash2 size={13} /></button>
                       </div>
                     </div>
                   ))}

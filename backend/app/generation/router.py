@@ -137,6 +137,23 @@ async def list_actes(dossier_id: str, cabinet_id: str = Depends(get_current_cabi
     return {"actes": result.data}
 
 
+@router.delete("/dossiers/{dossier_id}/actes/{acte_id}")
+async def delete_acte(dossier_id: str, acte_id: str, cabinet_id: str = Depends(get_current_cabinet_id)):
+    db = get_db()
+    acte = db.table("actes_generes").select("id, fichier_path").eq("id", acte_id).eq("dossier_id", dossier_id).eq("cabinet_id", cabinet_id).maybe_single().execute()
+    if not acte.data:
+        raise HTTPException(status_code=404, detail="Acte non trouvé")
+    # Delete file from storage
+    if acte.data.get("fichier_path"):
+        try:
+            db.storage.from_("documents-cabinets").remove([acte.data["fichier_path"]])
+        except Exception:
+            pass
+    # Delete record
+    db.table("actes_generes").delete().eq("id", acte_id).eq("cabinet_id", cabinet_id).execute()
+    return {"success": True}
+
+
 @router.get("/dossiers/{dossier_id}/actes/{acte_id}/download")
 async def download_acte(dossier_id: str, acte_id: str, cabinet_id: str = Depends(get_current_cabinet_id)):
     db = get_db()
