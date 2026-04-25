@@ -57,6 +57,14 @@ async def generer(dossier_id: str, user: dict = Depends(get_current_user)):
     # Detect mandatory clauses
     clauses_obligatoires = detect_clauses_obligatoires(infos, type_acte)
 
+    # Inject observations du clerc comme clauses supplémentaires
+    observations = infos.get("observations_redaction", "")
+    if observations:
+        for line in observations.strip().split("\n"):
+            line = line.strip()
+            if line:
+                clauses_obligatoires.append(f"Observation du clerc : {line}")
+
     # Build form_data
     form_data = {
         "type_acte": type_acte,

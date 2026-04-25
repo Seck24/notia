@@ -56,6 +56,9 @@ export default function DetailDossier() {
   const [bulkUploading, setBulkUploading] = useState(false)
   const [previewDoc, setPreviewDoc] = useState(null)
   const [extractionAlerts, setExtractionAlerts] = useState([])
+  const [observations, setObservations] = useState('')
+  const [savingObs, setSavingObs] = useState(false)
+  const [obsSaved, setObsSaved] = useState(false)
 
   async function load() {
     try {
@@ -63,6 +66,7 @@ export default function DetailDossier() {
       setData(d)
       setNotes(d.dossier?.notes_internes || '')
       setValeurBien(d.dossier?.infos_specifiques?.valeur_bien || '')
+      setObservations(d.dossier?.infos_specifiques?.observations_redaction || '')
     } catch { }
     setLoading(false)
   }
@@ -105,6 +109,15 @@ export default function DetailDossier() {
     setSavingNotes(false)
     setNotesSaved(true)
     setTimeout(() => setNotesSaved(false), 2000)
+  }
+
+  async function saveObservations() {
+    setSavingObs(true)
+    const infos = { ...(dossier?.infos_specifiques || {}), observations_redaction: observations }
+    await api.put(`/dossiers/${id}`, { infos_specifiques: infos }).catch(() => {})
+    setSavingObs(false)
+    setObsSaved(true)
+    setTimeout(() => setObsSaved(false), 2000)
   }
 
   async function genererActe() {
@@ -290,12 +303,54 @@ export default function DetailDossier() {
         {/* RIGHT: Dynamic content */}
         <div className={`space-y-4 ${tab === 'parties' ? 'hidden md:block' : ''}`}>
           {/* INFOS SPÉCIFIQUES */}
-          {dossier.infos_specifiques && Object.keys(dossier.infos_specifiques).filter(k => dossier.infos_specifiques[k]).length > 0 && (
+          {dossier.infos_specifiques && Object.keys(dossier.infos_specifiques).filter(k => dossier.infos_specifiques[k] && k !== 'observations_redaction').length > 0 && (
             <div className="card">
               <p className="text-xs font-semibold text-muted uppercase mb-2">Informations spécifiques</p>
-              {Object.entries(dossier.infos_specifiques).filter(([, v]) => v).map(([k, v]) => (
+              {Object.entries(dossier.infos_specifiques).filter(([k, v]) => v && k !== 'observations_redaction').map(([k, v]) => (
                 <div key={k} className="flex justify-between text-sm py-1"><span className="text-muted capitalize">{k.replace(/_/g, ' ')}</span><span className="font-medium text-navy">{String(v)}</span></div>
               ))}
+            </div>
+          )}
+
+          {/* OBSERVATIONS POUR LA RÉDACTION — visible dès analyse interne */}
+          {currentIdx >= 1 && currentIdx <= 4 && (
+            <div className="card border-amber-100">
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-xs font-semibold text-muted uppercase">Observations pour la rédaction</p>
+                {obsSaved && <span className="text-xs text-green-600 flex items-center gap-1"><Check size={12} /> Sauvegardé</span>}
+                {savingObs && <span className="text-xs text-muted">Enregistrement...</span>}
+              </div>
+              <p className="text-xs text-muted mb-2">Particularités à prendre en compte lors de la génération de l'acte</p>
+              <textarea
+                value={observations}
+                onChange={e => setObservations(e.target.value)}
+                onBlur={saveObservations}
+                className="w-full text-sm rounded-lg border border-border bg-amber-50/30 px-3 py-2.5 focus:outline-none focus:border-gold focus:ring-2 focus:ring-gold/20 resize-y"
+                style={{ minHeight: '100px' }}
+                placeholder="Ex: Le vendeur est sous tutelle, servitude de passage à mentionner, clause de réserve de jouissance souhaitée..."
+              />
+              {(() => {
+                const suggestions = {
+                  vente_immobiliere: ['Bien en indivision', 'Servitude de passage', 'Vendeur sous tutelle', 'Clause de réserve de jouissance', 'Condition suspensive de prêt'],
+                  constitution_sarl: ['Apports en nature à évaluer', 'Gérant non-associé', 'Clause d\'agrément renforcée', 'Siège chez le gérant'],
+                  succession: ['Mineur parmi les héritiers', 'Biens en indivision', 'Testament olographe', 'Conjoint survivant usufruitier'],
+                  donation: ['Donation avec charges', 'Réserve d\'usufruit', 'Donation entre époux'],
+                }
+                const items = suggestions[dossier.type_acte] || []
+                return items.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 mt-2">
+                    {items.map(s => (
+                      <button
+                        key={s}
+                        onClick={() => { setObservations(prev => prev ? `${prev}\n${s}` : s) }}
+                        className="text-[11px] px-2.5 py-1 rounded-full border border-amber-200 text-amber-700 hover:bg-amber-50 transition-colors"
+                      >
+                        + {s}
+                      </button>
+                    ))}
+                  </div>
+                )
+              })()}
             </div>
           )}
 
