@@ -11,7 +11,7 @@ from datetime import date as _date
 
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 MODEL = "claude-sonnet-4-20250514"  # legacy alias — prefer MODEL_CRITIQUE / MODEL_STANDARD
-MODEL_CRITIQUE = "claude-sonnet-4-6-20250627"      # Actes, vérification qualité, clauses
+MODEL_CRITIQUE = "claude-sonnet-4-20250514"      # Actes, vérification qualité, clauses
 MODEL_STANDARD = "claude-haiku-4-5-20251001"  # Extraction, commandes, résumés
 
 import time
