@@ -193,15 +193,19 @@ async def inviter_utilisateur(body: InviteRequest, user: dict = Depends(require_
 
     # Create utilisateur row
     full_name = f"{body.prenom} {body.nom}".strip() if body.prenom else body.nom
-    db.table("utilisateurs").insert({
+    user_data = {
         "cabinet_id": cabinet_id,
         "auth_id": auth_res.user.id,
         "email": body.email,
         "nom": body.nom,
         "prenom": body.prenom,
         "role": body.role,
-        "first_login": True,
-    }).execute()
+    }
+    try:
+        db.table("utilisateurs").insert({**user_data, "first_login": True}).execute()
+    except Exception:
+        # first_login column might not exist
+        db.table("utilisateurs").insert(user_data).execute()
 
     # Get cabinet info for the email
     cabinet = db.table("cabinets").select("nom").eq("id", cabinet_id).maybe_single().execute()
