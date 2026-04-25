@@ -19,6 +19,7 @@ export default function ListeDossiers() {
     try {
       const params = new URLSearchParams({ page, limit: 20 })
       if (filtre) params.set('statut', filtre)
+      if (search.trim()) params.set('search', search.trim())
       const { data } = await api.get(`/dossiers?${params}`)
       setDossiers(data.dossiers || [])
       setTotal(data.total || 0)
@@ -27,6 +28,12 @@ export default function ListeDossiers() {
   }
 
   useEffect(() => { load() }, [page, filtre])
+
+  // Recherche avec debounce
+  useEffect(() => {
+    const timer = setTimeout(() => { setPage(1); load() }, 400)
+    return () => clearTimeout(timer)
+  }, [search])
 
   // Sync URL params with filter
   useEffect(() => {
@@ -47,9 +54,7 @@ export default function ListeDossiers() {
     }
   }
 
-  const filtered = search
-    ? dossiers.filter(d => d.numero_dossier?.toLowerCase().includes(search.toLowerCase()) || d.type_acte?.includes(search.toLowerCase()))
-    : dossiers
+  const filtered = dossiers
 
   return (
     <div>
@@ -64,7 +69,7 @@ export default function ListeDossiers() {
         <div className="flex flex-wrap gap-3 mb-4">
           <div className="relative flex-1 min-w-[200px]">
             <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
-            <input value={search} onChange={e => setSearch(e.target.value)} className="input-field pl-9" placeholder="Rechercher..." />
+            <input value={search} onChange={e => setSearch(e.target.value)} className="input-field pl-9" placeholder="Rechercher par nom, n° dossier, téléphone..." />
           </div>
           <select
             value={filtre}

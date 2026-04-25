@@ -361,13 +361,48 @@ async def dashboard_stats(user: dict = Depends(get_current_user)):
 async def list_dossiers(
     statut: Optional[str] = Query(None),
     type_acte: Optional[str] = Query(None),
+    search: Optional[str] = Query(None),
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
     user: dict = Depends(get_current_user),
 ):
     cabinet_id = user["cabinet_id"]
     db = get_db()
+
+    # Si recherche, trouver les dossier_ids correspondants
+    dossier_ids_from_search = None
+    if search and search.strip():
+        q = search.strip()
+        dossier_ids_from_search = set()
+
+        # Chercher dans les parties (nom, prénom)
+        parties_match = db.table("parties").select("dossier_id").eq("cabinet_id", cabinet_id).or_(
+            f"nom.ilike.%{q}%,prenom.ilike.%{q}%"
+        ).execute()
+        for p in (parties_match.data or []):
+            dossier_ids_from_search.add(p["dossier_id"])
+
+        # Chercher dans les clients liés
+        clients_match = db.table("clients").select("id").eq("cabinet_id", cabinet_id).or_(
+            f"nom.ilike.%{q}%,prenom.ilike.%{q}%,telephone.ilike.%{q}%"
+        ).execute()
+        if clients_match.data:
+            client_ids = [c["id"] for c in clients_match.data]
+            for cid in client_ids:
+                parties_from_client = db.table("parties").select("dossier_id").eq("cabinet_id", cabinet_id).eq("client_id", cid).execute()
+                for p in (parties_from_client.data or []):
+                    dossier_ids_from_search.add(p["dossier_id"])
+
+        # Chercher dans les numéros de dossier
+        num_match = db.table("dossiers").select("id").eq("cabinet_id", cabinet_id).ilike("numero_dossier", f"%{q}%").execute()
+        for d in (num_match.data or []):
+            dossier_ids_from_search.add(d["id"])
+
+        if not dossier_ids_from_search:
+            return {"dossiers": [], "total": 0, "page": page}
+
     query = db.table("dossiers").select("*, utilisateurs!dossiers_assigne_a_fkey(nom, prenom), clients(nom, prenom), parties(nom, prenom, role)", count="exact").eq("cabinet_id", cabinet_id).neq("statut", "archive")
+
     # Limité: only sees assigned dossiers
     if user.get("role") == "limite":
         query = query.eq("assigne_a", user["id"])
@@ -375,6 +410,9 @@ async def list_dossiers(
         query = query.eq("statut", statut)
     if type_acte:
         query = query.eq("type_acte", type_acte)
+    if dossier_ids_from_search is not None:
+        query = query.in_("id", list(dossier_ids_from_search))
+
     offset = (page - 1) * limit
     result = query.order("created_at", desc=True).range(offset, offset + limit - 1).execute()
     return {"dossiers": result.data, "total": result.count, "page": page}
