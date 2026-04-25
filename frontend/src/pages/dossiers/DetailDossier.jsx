@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { User, FileText, Plus, Link2, Download, Loader2, Check, Circle, ChevronRight, Eye, Upload, Pencil, Trash2, Landmark, Building2, Users as UsersIcon, Gift, CreditCard, Copy, AlertTriangle, X, Sparkles } from 'lucide-react'
+import { User, FileText, Plus, Link2, Download, Loader2, Check, Circle, ChevronRight, Eye, Upload, Pencil, Trash2, Landmark, Building2, Users as UsersIcon, Gift, CreditCard, Copy, AlertTriangle, X, Sparkles, Send } from 'lucide-react'
 import api from '../../services/api'
 import useAuthStore from '../../stores/authStore'
 import StatutBadge from '../../components/dossiers/StatutBadge'
@@ -46,6 +46,8 @@ export default function DetailDossier() {
   const [savingNotes, setSavingNotes] = useState(false)
   const [notesSaved, setNotesSaved] = useState(false)
   const [uploadLink, setUploadLink] = useState(null)
+  const [showRelance, setShowRelance] = useState(false)
+  const [relanceCopied, setRelanceCopied] = useState(false)
   const [tab, setTab] = useState('main') // mobile
   const [addingPartie, setAddingPartie] = useState(null)
   const [valeurBien, setValeurBien] = useState('')
@@ -146,11 +148,37 @@ export default function DetailDossier() {
     } catch { alert('Erreur lors de la suppression') }
   }
 
-  async function genUploadLink() {
+  async function genUploadLink(relance = false) {
     try {
       const { data: r } = await api.post(`/dossiers/${id}/upload-link`)
-      setUploadLink(`${window.location.origin}/upload/${r.token}`)
+      const link = `${window.location.origin}/upload/${r.token}`
+      setUploadLink(link)
+      if (relance) setShowRelance(true)
     } catch (err) { alert(err.response?.data?.detail || 'Erreur') }
+  }
+
+  function getRelanceMessage() {
+    const manquants = documents.filter(d => d.statut === 'manquant').map(d => d.nom_document)
+    const cabinetName = dossier?.cabinet_id ? '' : ''
+    const lines = [
+      `Bonjour,`,
+      ``,
+      `Nous vous contactons au sujet de votre dossier.`,
+      `Il nous manque encore ${manquants.length} document${manquants.length > 1 ? 's' : ''} :`,
+      ...manquants.map(d => `  - ${d}`),
+      ``,
+      `Vous pouvez nous les envoyer facilement via ce lien :`,
+      uploadLink || '',
+      ``,
+      `Merci et à bientôt.`,
+    ]
+    return lines.join('\n')
+  }
+
+  function copyRelance() {
+    navigator.clipboard.writeText(getRelanceMessage())
+    setRelanceCopied(true)
+    setTimeout(() => setRelanceCopied(false), 2000)
   }
 
   async function validerDoc(nom) {
@@ -382,7 +410,10 @@ export default function DetailDossier() {
                     <Upload size={14} /> Uploader plusieurs
                     <input type="file" className="hidden" multiple accept="image/*,application/pdf" onChange={handleBulkFiles} />
                   </label>
-                  <button onClick={genUploadLink} className="btn-secondary text-xs py-1.5 px-3 flex items-center gap-1"><Link2 size={14} /> Lien client</button>
+                  <button onClick={() => genUploadLink(false)} className="btn-secondary text-xs py-1.5 px-3 flex items-center gap-1"><Link2 size={14} /> Lien client</button>
+                  {documents.some(d => d.statut === 'manquant') && (
+                    <button onClick={() => genUploadLink(true)} className="btn-secondary text-xs py-1.5 px-3 flex items-center gap-1 border-amber-300 text-amber-700 hover:bg-amber-50"><Send size={14} /> Relancer</button>
+                  )}
                 </div>
               </div>
 
@@ -392,6 +423,36 @@ export default function DetailDossier() {
                   <div className="flex gap-2">
                     <input value={uploadLink} readOnly className="input-field text-xs font-mono flex-1" />
                     <button onClick={() => { navigator.clipboard.writeText(uploadLink); }} className="btn-primary text-xs py-1.5 px-3"><Copy size={14} /></button>
+                  </div>
+                </div>
+              )}
+
+              {/* Relance client */}
+              {showRelance && uploadLink && (
+                <div className="mb-4 p-4 bg-amber-50/50 border border-amber-200 rounded-lg">
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="text-sm font-semibold text-amber-800">Message de relance</p>
+                    <button onClick={() => setShowRelance(false)} className="text-amber-400 hover:text-amber-600"><X size={16} /></button>
+                  </div>
+                  <p className="text-xs text-amber-600 mb-2">Copiez ce message et envoyez-le au client par WhatsApp ou email</p>
+                  <textarea
+                    value={getRelanceMessage()}
+                    readOnly
+                    className="w-full text-sm rounded-lg border border-amber-200 bg-white px-3 py-2.5 resize-y"
+                    style={{ minHeight: '150px' }}
+                  />
+                  <div className="flex gap-2 mt-2">
+                    <button onClick={copyRelance} className="btn-primary text-xs py-2 px-4 flex items-center gap-1.5">
+                      {relanceCopied ? <><Check size={14} /> Copié !</> : <><Copy size={14} /> Copier le message</>}
+                    </button>
+                    <a
+                      href={`https://wa.me/?text=${encodeURIComponent(getRelanceMessage())}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="btn-secondary text-xs py-2 px-4 flex items-center gap-1.5 bg-green-50 border-green-300 text-green-700 hover:bg-green-100"
+                    >
+                      <Send size={14} /> Envoyer par WhatsApp
+                    </a>
                   </div>
                 </div>
               )}
@@ -687,7 +748,7 @@ export default function DetailDossier() {
         onActionExecuted={(frontendAction, donnees, action) => {
           if (frontendAction === 'upload_link') { genUploadLink(); return }
           if (frontendAction === 'generer') { genererActe(); return }
-          if (frontendAction === 'relance') { genUploadLink(); return }
+          if (frontendAction === 'relance') { genUploadLink(true); return }
 
           // Mise à jour locale du state sans rechargement
           if (donnees && Object.keys(donnees).length > 0) {
