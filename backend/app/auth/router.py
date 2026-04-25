@@ -170,7 +170,7 @@ async def inviter_utilisateur(body: InviteRequest, user: dict = Depends(require_
     cabinet_id = user["cabinet_id"]
 
     # Check email not already used in this cabinet
-    existing = db.table("utilisateurs").select("id").eq("cabinet_id", cabinet_id).eq("email", body.email).maybe_single().execute()
+    existing = db.table("utilisateurs").select("id").eq("cabinet_id", cabinet_id).eq("email", body.email).execute()
     if existing.data:
         raise HTTPException(status_code=400, detail="Un utilisateur avec cet email existe déjà")
 
