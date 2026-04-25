@@ -349,3 +349,120 @@ async def archive_dossier(dossier_id: str, cabinet_id: str = Depends(get_current
     if not result.data:
         raise HTTPException(status_code=404, detail="Dossier non trouvé")
     return {"success": True, "message": "Dossier archivé"}
+
+
+COMMANDE_PROMPT = """Tu es l'assistant du clerc notarial. Analyse cette commande et retourne UNIQUEMENT ce JSON :
+{
+  "action": "string",
+  "params": {},
+  "confirmation": "string",
+  "execute": true|false
+}
+
+Actions possibles :
+- changer_statut : params: { "nouveau_statut": "reception_client|analyse_interne|attente_pieces|demarches_admin|redaction_projet|observations_client|signature_finale" }
+- marquer_document_recu : params: { "nom_document": "string" }
+- marquer_tous_documents_recus : params: {}
+- ajouter_partie : params: { "nom": "string", "prenom": "string", "role": "string", "type_partie": "personne_physique|personne_morale" }
+- envoyer_lien_upload : params: {}
+- mettre_a_jour_info : params: { "champ": "string", "valeur": "any" }
+- generer_acte : params: {}
+- inconnu : params: {}
+
+confirmation = phrase courte décrivant ce qui va être fait.
+execute = true si action claire et sans ambiguïté, false si besoin de confirmer.
+
+Contexte du dossier :
+"""
+
+
+class CommandeRequest(BaseModel):
+    texte: str
+
+
+@router.post("/{dossier_id}/commande")
+async def executer_commande(dossier_id: str, body: CommandeRequest, user: dict = Depends(get_current_user)):
+    cabinet_id = user["cabinet_id"]
+    db = get_db()
+
+    # Get dossier context
+    dossier = db.table("dossiers").select("*").eq("id", dossier_id).eq("cabinet_id", cabinet_id).maybe_single().execute()
+    if not dossier.data:
+        raise HTTPException(status_code=404, detail="Dossier non trouvé")
+
+    docs = db.table("documents_dossier").select("nom_document, statut").eq("dossier_id", dossier_id).execute()
+    parties_list = db.table("parties").select("nom, prenom, role").eq("dossier_id", dossier_id).execute()
+
+    context = f"""Type: {dossier.data['type_acte']}
+Statut actuel: {dossier.data['statut']}
+Documents: {_json.dumps([d['nom_document'] + ' (' + d['statut'] + ')' for d in (docs.data or [])], ensure_ascii=False)}
+Parties: {_json.dumps([f"{p.get('prenom','')} {p.get('nom','')} ({p.get('role','')})" for p in (parties_list.data or [])], ensure_ascii=False)}
+Infos: {_json.dumps(dossier.data.get('infos_specifiques', {}), ensure_ascii=False)}"""
+
+    client = get_claude()
+    message = _claude_call_with_retry(
+        client, model=MODEL, max_tokens=500,
+        system=COMMANDE_PROMPT + context,
+        messages=[{"role": "user", "content": body.texte}],
+    )
+
+    text = message.content[0].text.strip()
+    if text.startswith("```"):
+        lines = text.split("\n")
+        text = "\n".join(lines[1:-1])
+
+    try:
+        result = _json.loads(text)
+    except _json.JSONDecodeError:
+        return {"action": "inconnu", "confirmation": "Je n'ai pas compris. Essayez : 'CNI vendeur reçu' ou 'passer en rédaction'", "execute": False, "executed": False}
+
+    action = result.get("action", "inconnu")
+    params = result.get("params", {})
+    executed = False
+
+    if result.get("execute", False) and action != "inconnu":
+        # Execute the action
+        if action == "changer_statut" and params.get("nouveau_statut"):
+            new_statut = params["nouveau_statut"]
+            if new_statut in STATUTS_VALIDES:
+                db.table("dossiers").update({"statut": new_statut, "updated_at": "now()"}).eq("id", dossier_id).eq("cabinet_id", cabinet_id).execute()
+                log_activity(cabinet_id, dossier_id, "statut_change", f"Statut passé à {new_statut.replace('_', ' ')} (commande IA)", user["id"])
+                executed = True
+
+        elif action == "marquer_document_recu" and params.get("nom_document"):
+            nom = params["nom_document"]
+            # Fuzzy match document name
+            for d in (docs.data or []):
+                if nom.lower() in d["nom_document"].lower() or d["nom_document"].lower() in nom.lower():
+                    db.table("documents_dossier").update({"statut": "recu", "uploaded_at": datetime.now().isoformat()}).eq("dossier_id", dossier_id).eq("cabinet_id", cabinet_id).eq("nom_document", d["nom_document"]).execute()
+                    log_activity(cabinet_id, dossier_id, "document_recu", f"Document '{d['nom_document']}' marqué reçu (commande IA)", user["id"])
+                    executed = True
+                    break
+
+        elif action == "marquer_tous_documents_recus":
+            db.table("documents_dossier").update({"statut": "recu", "uploaded_at": datetime.now().isoformat()}).eq("dossier_id", dossier_id).eq("cabinet_id", cabinet_id).eq("statut", "manquant").execute()
+            log_activity(cabinet_id, dossier_id, "document_recu", "Tous les documents marqués reçus (commande IA)", user["id"])
+            executed = True
+
+        elif action == "mettre_a_jour_info" and params.get("champ"):
+            infos = dossier.data.get("infos_specifiques", {}) or {}
+            infos[params["champ"]] = params["valeur"]
+            db.table("dossiers").update({"infos_specifiques": infos, "updated_at": "now()"}).eq("id", dossier_id).eq("cabinet_id", cabinet_id).execute()
+            executed = True
+
+        elif action == "envoyer_lien_upload":
+            result["needs_frontend_action"] = "upload_link"
+            executed = False
+
+        elif action == "generer_acte":
+            result["needs_frontend_action"] = "generer"
+            executed = False
+
+    return {
+        "action": action,
+        "params": params,
+        "confirmation": result.get("confirmation", ""),
+        "execute": result.get("execute", False),
+        "executed": executed,
+        "needs_frontend_action": result.get("needs_frontend_action"),
+    }

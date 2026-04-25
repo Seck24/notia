@@ -5,6 +5,7 @@ import api from '../../services/api'
 import useAuthStore from '../../stores/authStore'
 import StatutBadge from '../../components/dossiers/StatutBadge'
 import FormulairePartie from '../../components/parties/FormulairePartie'
+import BarreCommande from '../../components/dossiers/BarreCommande'
 
 const STATUTS = [
   { id: 'reception_client', label: 'Réception client', idx: 0 },
@@ -370,6 +371,17 @@ export default function DetailDossier() {
           </div>
         </div>
       </div>
+
+      {/* Barre de commande naturelle */}
+      <BarreCommande
+        dossierId={id}
+        statut={dossier.statut}
+        onActionExecuted={(frontendAction) => {
+          if (frontendAction === 'upload_link') genUploadLink()
+          else if (frontendAction === 'generer') genererActe()
+          else load()
+        }}
+      />
     </div>
   )
 }
