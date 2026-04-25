@@ -105,15 +105,21 @@ async def generer(dossier_id: str, user: dict = Depends(get_current_user)):
     # Update dossier status
     db.table("dossiers").update({"statut": "redaction_projet", "updated_at": "now()"}).eq("id", dossier_id).execute()
 
-    log_activity(cabinet_id, dossier_id, "acte_genere", f"Acte v{version} généré ({type_acte.replace('_', ' ')})", user["id"])
+    try:
+        log_activity(cabinet_id, dossier_id, "acte_genere", f"Acte v{version} généré ({type_acte.replace('_', ' ')})", user["id"])
+    except Exception:
+        pass
 
-    db.table("logs_generation").insert({
-        "cabinet_id": cabinet_id,
-        "dossier_id": dossier_id,
-        "type_acte": type_acte,
-        "version": version,
-        "genere_par": user["id"],
-    }).execute()
+    try:
+        db.table("logs_generation").insert({
+            "cabinet_id": cabinet_id,
+            "dossier_id": dossier_id,
+            "type_acte": type_acte,
+            "version": version,
+            "genere_par": user["id"],
+        }).execute()
+    except Exception:
+        pass
 
     return {
         "success": True,
