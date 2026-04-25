@@ -1,225 +1,202 @@
-import { useState, useEffect, useCallback } from 'react'
-import { useNavigate, useSearchParams } from 'react-router-dom'
-import { FileText, Building2, Users, Gift, Landmark, Plus, Trash2, Search, X, Check } from 'lucide-react'
+import { useState } from 'react'
+import { useNavigate, Link } from 'react-router-dom'
+import { Loader2, Check, AlertTriangle, User, Building2, FileText, CreditCard, Shield } from 'lucide-react'
 import api from '../../services/api'
-import FormulairePartie from '../../components/parties/FormulairePartie'
-import ModalNouveauClient from '../../components/clients/ModalNouveauClient'
 
-const STEPS = ['Client', 'Type d\'acte', 'Autres parties', 'Récapitulatif']
-
-const TYPES = [
-  { id: 'vente_immobiliere', label: 'Vente immobilière', icon: Landmark, desc: 'Cession d\'un bien immobilier', roles: ['vendeur', 'acquereur'] },
-  { id: 'constitution_sarl', label: 'Constitution de société', icon: Building2, desc: 'Création SARL, SA, SAS...', roles: ['associe', 'gerant'] },
-  { id: 'succession', label: 'Succession', icon: Users, desc: 'Règlement d\'une succession', roles: ['defunt', 'heritier'] },
-  { id: 'donation', label: 'Donation', icon: Gift, desc: 'Transmission à titre gratuit', roles: ['donateur', 'donataire'] },
-  { id: 'ouverture_credit', label: 'Ouverture de crédit', icon: FileText, desc: 'Prêt bancaire avec garanties', roles: ['debiteur', 'creancier'] },
-]
+const TYPES_LABELS = {
+  vente_immobiliere: 'Vente immobilière',
+  constitution_sarl: 'Constitution de société',
+  succession: 'Succession',
+  donation: 'Donation',
+  ouverture_credit: 'Ouverture de crédit',
+}
 
 const ROLE_LABELS = {
   vendeur: 'Vendeur', acquereur: 'Acquéreur', associe: 'Associé', gerant: 'Gérant',
   defunt: 'Défunt', heritier: 'Héritier', donateur: 'Donateur', donataire: 'Donataire',
-  debiteur: 'Débiteur / Emprunteur', creancier: 'Créancier / Prêteur',
-}
-
-function clientName(c) {
-  return c?.type_client === 'entreprise' ? c.raison_sociale : `${c?.prenom || ''} ${c?.nom || ''}`.trim()
+  debiteur: 'Débiteur', creancier: 'Créancier',
 }
 
 export default function NouveauDossier() {
   const nav = useNavigate()
-  const [params] = useSearchParams()
-  const [step, setStep] = useState(0)
-  const [client, setClient] = useState(null)
-  const [searchQuery, setSearchQuery] = useState('')
-  const [searchResults, setSearchResults] = useState([])
-  const [showCreateModal, setShowCreateModal] = useState(false)
-  const [typeActe, setTypeActe] = useState(null)
-  const [infos, setInfos] = useState({})
-  const [parties, setParties] = useState([])
-  const [editingPartie, setEditingPartie] = useState(null)
-  const [loading, setLoading] = useState(false)
+  const [phase, setPhase] = useState(1)
+  const [description, setDescription] = useState('')
+  const [analyzing, setAnalyzing] = useState(false)
+  const [analyse, setAnalyse] = useState(null)
   const [error, setError] = useState('')
+  const [correction, setCorrection] = useState('')
+  const [creating, setCreating] = useState(false)
 
-  const typeConfig = TYPES.find(t => t.id === typeActe)
-
-  useEffect(() => {
-    const clientId = params.get('client')
-    if (clientId) {
-      api.get(`/clients/${clientId}`).then(({ data }) => { if (data.client) setClient(data.client) }).catch(() => {})
+  async function analyser() {
+    if (!description.trim() || description.trim().length < 10) {
+      setError('Décrivez le dossier en quelques mots (minimum 10 caractères)')
+      return
     }
-  }, [])
+    setAnalyzing(true)
+    setError('')
+    try {
+      const { data } = await api.post('/dossiers/analyser-description', { description: description.trim() })
+      setAnalyse(data.analyse)
+      setPhase(2)
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Erreur lors de l\'analyse. Réessayez avec plus de détails.')
+    }
+    setAnalyzing(false)
+  }
 
-  const handleSearch = useCallback(async (q) => {
-    setSearchQuery(q)
-    if (q.length < 2) { setSearchResults([]); return }
-    try { const { data } = await api.get(`/clients/search?q=${encodeURIComponent(q)}`); setSearchResults(data.clients || []) } catch { setSearchResults([]) }
-  }, [])
-
-  function addPartie(data) {
-    if (editingPartie?.index !== undefined) { setParties(p => p.map((item, i) => i === editingPartie.index ? data : item)) } else { setParties(p => [...p, data]) }
-    setEditingPartie(null)
+  async function corriger() {
+    if (!correction.trim()) return
+    setAnalyzing(true)
+    setError('')
+    try {
+      const { data } = await api.post('/dossiers/analyser-description', {
+        description: `${description}\n\nCorrection : ${correction.trim()}`,
+      })
+      setAnalyse(data.analyse)
+      setCorrection('')
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Erreur')
+    }
+    setAnalyzing(false)
   }
 
   async function creerDossier() {
-    setLoading(true); setError('')
+    setCreating(true)
+    setError('')
     try {
-      const { data } = await api.post('/dossiers', { type_acte: typeActe, client_id: client.id, infos_specifiques: infos })
-      const dossierId = data.dossier.id
-      for (const partie of parties) { await api.post(`/dossiers/${dossierId}/parties`, partie) }
-      nav(`/dossiers/${dossierId}`)
-    } catch (err) { setError(err.response?.data?.detail || 'Erreur lors de la création') }
-    setLoading(false)
+      const { data } = await api.post('/dossiers/creer-depuis-analyse', { analyse })
+      nav(`/dossiers/${data.dossier_id}`)
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Erreur lors de la création')
+    }
+    setCreating(false)
   }
 
   return (
-    <div className="max-w-2xl mx-auto">
-      <h1 className="text-2xl font-display font-bold text-navy mb-6">Nouveau dossier</h1>
+    <div className="max-w-[680px] mx-auto">
+      <h1 className="text-2xl font-display font-bold text-navy mb-1">Nouveau dossier</h1>
 
-      {/* Stepper */}
-      <div className="flex items-center gap-1 mb-8">
-        {STEPS.map((s, i) => (
-          <div key={s} className="flex-1 flex items-center gap-2">
-            <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${i < step ? 'bg-gold text-white' : i === step ? 'bg-gold/20 text-gold border-2 border-gold' : 'bg-border text-muted'}`}>
-              {i < step ? <Check size={14} /> : i + 1}
-            </div>
-            <span className={`text-xs font-medium hidden sm:block ${i <= step ? 'text-navy' : 'text-muted'}`}>{s}</span>
-            {i < STEPS.length - 1 && <div className={`flex-1 h-0.5 ${i < step ? 'bg-gold' : 'bg-border'}`} />}
-          </div>
-        ))}
-      </div>
-
-      {/* Step 0: Client */}
-      {step === 0 && (
-        <div className="space-y-4">
-          <div><h2 className="text-lg font-display font-semibold text-navy">Pour qui ouvrez-vous ce dossier ?</h2><p className="text-sm text-muted mt-1">Recherchez un client existant ou créez-en un nouveau</p></div>
-          {client ? (
-            <div className="card bg-gold/5 border-gold/30">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="w-12 h-12 rounded-full bg-gold/20 flex items-center justify-center text-gold font-bold">{(clientName(client) || '?')[0]?.toUpperCase()}</div>
-                  <div>
-                    <p className="font-medium text-navy">{clientName(client)}</p>
-                    <p className="text-xs text-muted">{client.telephone || client.email || ''}</p>
-                    <span className={`inline-block mt-1 px-2 py-0.5 rounded-full text-xs font-semibold ${client.type_client === 'entreprise' ? 'bg-indigo-100 text-indigo-700' : 'bg-amber-100 text-amber-700'}`}>{client.type_client === 'entreprise' ? 'Entreprise' : 'Particulier'}</span>
-                  </div>
-                </div>
-                <button onClick={() => setClient(null)} className="text-muted hover:text-red-500"><X size={18} /></button>
-              </div>
-            </div>
-          ) : (
-            <>
-              <div className="relative">
-                <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
-                <input value={searchQuery} onChange={e => handleSearch(e.target.value)} className="input-field pl-9" placeholder="Nom, téléphone, email..." autoFocus />
-                {searchResults.length > 0 && (
-                  <div className="absolute z-10 top-full mt-1 left-0 right-0 bg-white border border-border rounded-lg shadow-lg max-h-60 overflow-y-auto">
-                    {searchResults.map(c => (
-                      <button key={c.id} onClick={() => { setClient(c); setSearchQuery(''); setSearchResults([]) }} className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-surface border-b border-border/50 last:border-0">
-                        <div className="w-8 h-8 rounded-full bg-gold/10 flex items-center justify-center text-gold text-xs font-bold">{(clientName(c) || '?')[0]?.toUpperCase()}</div>
-                        <div><p className="text-sm font-medium text-navy">{clientName(c)}</p><p className="text-xs text-muted">{c.telephone || ''}</p></div>
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-              <div className="flex items-center gap-3 text-muted text-sm"><div className="flex-1 h-px bg-border" /> ou <div className="flex-1 h-px bg-border" /></div>
-              <button onClick={() => setShowCreateModal(true)} className="btn-secondary w-full flex items-center justify-center gap-2"><Plus size={16} /> Créer un nouveau client</button>
-            </>
-          )}
-          <button onClick={() => setStep(1)} disabled={!client} className="btn-primary w-full disabled:opacity-50">Suivant</button>
-        </div>
-      )}
-
-      {/* Step 1: Type d'acte */}
-      {step === 1 && (
-        <div className="space-y-4">
-          <h2 className="text-lg font-display font-semibold text-navy">Quel est l'objet du dossier ?</h2>
-          <div className="grid grid-cols-2 gap-3">
-            {TYPES.map(t => (
-              <button key={t.id} onClick={() => setTypeActe(t.id)} className={`card text-left hover:border-gold transition-colors ${typeActe === t.id ? 'border-gold bg-gold/5' : ''}`}>
-                <div className="w-10 h-10 rounded-lg bg-navy/5 flex items-center justify-center mb-2"><t.icon size={20} className="text-navy" /></div>
-                <p className="font-medium text-navy text-sm">{t.label}</p>
-                <p className="text-xs text-muted mt-0.5">{t.desc}</p>
-              </button>
-            ))}
-          </div>
-          {typeActe === 'vente_immobiliere' && (
-            <div className="card space-y-3">
-              <p className="text-xs font-semibold text-muted uppercase">Informations complémentaires</p>
-              <div className="grid grid-cols-2 gap-3">
-                <div><label className="block text-xs font-medium text-muted mb-1">Nature du bien</label><select value={infos.nature_bien || ''} onChange={e => setInfos(f => ({ ...f, nature_bien: e.target.value }))} className="input-field"><option value="">—</option><option value="terrain">Terrain</option><option value="maison">Maison/Villa</option><option value="appartement">Appartement</option><option value="local_commercial">Local commercial</option></select></div>
-                <div><label className="block text-xs font-medium text-muted mb-1">Valeur (FCFA)</label><input type="number" value={infos.valeur_bien || ''} onChange={e => setInfos(f => ({ ...f, valeur_bien: e.target.value }))} className="input-field" /></div>
-              </div>
-              <div><label className="block text-xs font-medium text-muted mb-1">Mode de paiement</label><select value={infos.mode_paiement || ''} onChange={e => setInfos(f => ({ ...f, mode_paiement: e.target.value }))} className="input-field"><option value="">—</option><option value="comptant">Comptant</option><option value="credit_bancaire">Crédit bancaire</option><option value="echelonne">Échelonné</option></select></div>
-              {infos.mode_paiement === 'credit_bancaire' && <div><label className="block text-xs font-medium text-muted mb-1">Banque</label><input value={infos.banque || ''} onChange={e => setInfos(f => ({ ...f, banque: e.target.value }))} className="input-field" /></div>}
-              <div className="flex gap-4">
-                <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={infos.bien_hypotheque || false} onChange={e => setInfos(f => ({ ...f, bien_hypotheque: e.target.checked }))} className="rounded border-border text-gold focus:ring-gold" /> Bien hypothéqué</label>
-                <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={infos.condition_suspensive || false} onChange={e => setInfos(f => ({ ...f, condition_suspensive: e.target.checked }))} className="rounded border-border text-gold focus:ring-gold" /> Condition suspensive</label>
-              </div>
-            </div>
-          )}
-          {typeActe === 'constitution_sarl' && (
-            <div className="card space-y-3"><p className="text-xs font-semibold text-muted uppercase">Informations complémentaires</p>
-              <div className="grid grid-cols-2 gap-3"><div><label className="block text-xs font-medium text-muted mb-1">Capital (FCFA)</label><input type="number" value={infos.capital || ''} onChange={e => setInfos(f => ({ ...f, capital: e.target.value }))} className="input-field" /></div><div><label className="block text-xs font-medium text-muted mb-1">Siège social</label><input value={infos.siege_social || ''} onChange={e => setInfos(f => ({ ...f, siege_social: e.target.value }))} className="input-field" /></div></div>
-            </div>
-          )}
-          {typeActe === 'succession' && (
-            <div className="card space-y-3"><p className="text-xs font-semibold text-muted uppercase">Informations complémentaires</p>
-              <div className="grid grid-cols-2 gap-3"><div><label className="block text-xs font-medium text-muted mb-1">Date décès</label><input type="date" value={infos.date_deces || ''} onChange={e => setInfos(f => ({ ...f, date_deces: e.target.value }))} className="input-field" /></div><div><label className="block text-xs font-medium text-muted mb-1">Lieu décès</label><input value={infos.lieu_deces || ''} onChange={e => setInfos(f => ({ ...f, lieu_deces: e.target.value }))} className="input-field" /></div></div>
-            </div>
-          )}
-          <div className="flex gap-3"><button onClick={() => setStep(0)} className="btn-secondary flex-1">Précédent</button><button onClick={() => setStep(2)} disabled={!typeActe} className="btn-primary flex-1 disabled:opacity-50">Suivant</button></div>
-        </div>
-      )}
-
-      {/* Step 2: Parties */}
-      {step === 2 && typeConfig && (
-        <div className="space-y-4">
-          <div><h2 className="text-lg font-display font-semibold text-navy">Autres parties au dossier</h2><p className="text-sm text-muted mt-1">Le client principal est inclus. Ajoutez les autres parties si nécessaire.</p></div>
-          {editingPartie ? (
-            <div className="card border-gold"><p className="text-xs font-semibold text-gold uppercase mb-3">{ROLE_LABELS[editingPartie.role]}</p><FormulairePartie role={editingPartie.role} initial={editingPartie.index !== undefined ? parties[editingPartie.index] : undefined} onSave={addPartie} onCancel={() => setEditingPartie(null)} /></div>
-          ) : (
-            <>
-              {typeConfig.roles.map(role => {
-                const rp = parties.filter(p => p.role === role)
-                return (
-                  <div key={role} className="card">
-                    <div className="flex items-center justify-between mb-3"><p className="text-sm font-semibold text-navy">{ROLE_LABELS[role]}(s)</p><button onClick={() => setEditingPartie({ role })} className="text-xs text-gold font-medium flex items-center gap-1 hover:underline"><Plus size={14} /> Ajouter</button></div>
-                    {rp.length === 0 ? <p className="text-xs text-muted italic">Aucun ajouté — optionnel</p> : (
-                      <div className="space-y-2">{rp.map(p => { const idx = parties.indexOf(p); const nm = p.type_partie === 'personne_physique' ? `${p.prenom || ''} ${p.nom || ''}`.trim() || 'Sans nom' : p.raison_sociale || 'Sans nom'; return (
-                        <div key={idx} className="flex items-center justify-between p-2.5 bg-surface rounded-lg border border-border"><div><p className="text-sm font-medium text-navy">{nm}</p></div><div className="flex gap-1"><button onClick={() => setEditingPartie({ role, index: idx })} className="text-xs text-muted hover:text-navy px-2 py-1">Modifier</button><button onClick={() => setParties(ps => ps.filter((_, i) => i !== idx))} className="text-red-400 hover:text-red-600 px-1"><Trash2 size={14} /></button></div></div>
-                      )})}</div>
-                    )}
-                  </div>
-                )
-              })}
-              <div className="flex gap-3"><button onClick={() => setStep(1)} className="btn-secondary flex-1">Précédent</button><button onClick={() => setStep(3)} className="btn-primary flex-1">Suivant</button></div>
-            </>
-          )}
-        </div>
-      )}
-
-      {/* Step 3: Récap */}
-      {step === 3 && (
-        <div className="space-y-4">
-          <h2 className="text-lg font-display font-semibold text-navy">Récapitulatif</h2>
-          <div className="card bg-surface space-y-3">
-            <div className="flex justify-between text-sm"><span className="text-muted">Client</span><span className="font-medium text-navy">{clientName(client)}</span></div>
-            <div className="flex justify-between text-sm"><span className="text-muted">Type d'acte</span><span className="font-medium text-navy capitalize">{typeActe?.replace(/_/g, ' ')}</span></div>
-            <div className="flex justify-between text-sm"><span className="text-muted">Autres parties</span><span className="font-medium text-navy">{parties.length}</span></div>
-            {infos.valeur_bien && <div className="flex justify-between text-sm"><span className="text-muted">Valeur</span><span className="font-medium text-navy">{Number(infos.valeur_bien).toLocaleString('fr-FR')} FCFA</span></div>}
-          </div>
-          {parties.length > 0 && (
-            <div className="card"><p className="text-xs font-semibold text-muted uppercase mb-2">Parties</p>{parties.map((p, i) => (
-              <div key={i} className="flex items-center justify-between py-1.5 text-sm"><span className="text-navy">{p.type_partie === 'personne_physique' ? `${p.prenom || ''} ${p.nom || ''}`.trim() : p.raison_sociale}</span><span className="text-xs text-muted">{ROLE_LABELS[p.role]}</span></div>
-            ))}</div>
-          )}
+      {phase === 1 && (
+        <div className="space-y-4 mt-6">
+          <p className="text-sm text-muted">Décrivez le dossier en quelques mots</p>
+          <textarea
+            value={description}
+            onChange={e => setDescription(e.target.value)}
+            className="input-field text-sm"
+            rows={7}
+            placeholder={"Exemples :\n• Koné Amara veut vendre sa maison à Cocody à Diabaté Seydou. Le bien est hypothéqué à la BACI, paiement par crédit SGBCI. Koné est marié sous communauté.\n\n• Constitution d'une SARL entre Traoré Michel et Bamba Fatou, capital 1 000 000 FCFA, siège à Yopougon.\n\n• Succession de feu Kouamé Jean, 3 héritiers : sa femme et 2 enfants."}
+            autoFocus
+          />
           {error && <p className="text-red-500 text-sm text-center">{error}</p>}
-          <div className="flex gap-3"><button onClick={() => setStep(2)} className="btn-secondary flex-1">Précédent</button><button onClick={creerDossier} disabled={loading} className="btn-navy flex-1 disabled:opacity-50">{loading ? 'Création...' : 'Créer le dossier'}</button></div>
+          <button onClick={analyser} disabled={analyzing || !description.trim()} className="btn-primary w-full py-3 text-base disabled:opacity-50 flex items-center justify-center gap-2">
+            {analyzing ? <><Loader2 size={18} className="animate-spin" /> Analyse en cours...</> : 'Analyser le dossier →'}
+          </button>
+          <div className="text-center">
+            <Link to="/dossiers/nouveau/formulaire" className="text-xs text-muted hover:text-gold transition-colors">
+              Préférer le formulaire étape par étape →
+            </Link>
+          </div>
         </div>
       )}
 
-      {showCreateModal && <ModalNouveauClient onClose={() => setShowCreateModal(false)} onCreated={(c) => { setClient(c); setShowCreateModal(false) }} />}
+      {phase === 2 && analyse && (
+        <div className="space-y-4 mt-6">
+          <div className="card border-green-200 bg-green-50/30">
+            <div className="flex items-center gap-2 mb-4">
+              <Check size={18} className="text-green-600" />
+              <p className="font-semibold text-navy">Voici ce que j'ai compris</p>
+            </div>
+
+            <div className="flex items-center justify-between py-2 border-b border-border/50">
+              <span className="text-sm text-muted">Type</span>
+              <span className="text-sm font-medium text-navy">{TYPES_LABELS[analyse.type_acte] || analyse.type_acte || '—'}</span>
+            </div>
+
+            {analyse.parties?.length > 0 && (
+              <div className="py-3 border-b border-border/50">
+                <p className="text-sm text-muted mb-2">Parties</p>
+                <div className="space-y-2">
+                  {analyse.parties.map((p, i) => (
+                    <div key={i} className="flex items-center gap-3">
+                      <div className="w-7 h-7 rounded-full bg-gold/10 flex items-center justify-center">
+                        {p.type_partie === 'personne_morale' ? <Building2 size={13} className="text-gold" /> : <User size={13} className="text-gold" />}
+                      </div>
+                      <div>
+                        <p className="text-sm font-medium text-navy">{p.prenom || ''} {p.nom || ''} <span className="text-muted font-normal">— {ROLE_LABELS[p.role] || p.role}</span></p>
+                        {p.situation_matrimoniale === 'marie' && p.regime_matrimonial && (
+                          <p className="text-xs text-muted">{p.regime_matrimonial === 'communaute' ? 'Marié(e), communauté de biens' : 'Marié(e), séparation de biens'}</p>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {analyse.points_attention?.length > 0 && (
+              <div className="py-3 border-b border-border/50">
+                <p className="text-sm text-muted mb-2">Particularités</p>
+                <div className="space-y-1">
+                  {analyse.points_attention.map((p, i) => (
+                    <div key={i} className="flex items-center gap-2 text-sm">
+                      <Shield size={13} className="text-amber-500 shrink-0" />
+                      <span className="text-navy">{p}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {analyse.infos_specifiques && (
+              <div className="py-3 border-b border-border/50">
+                <p className="text-sm text-muted mb-2">Détails</p>
+                <div className="space-y-1 text-sm">
+                  {analyse.infos_specifiques.bien_hypotheque && <div className="flex items-center gap-2"><CreditCard size={13} className="text-amber-500" /><span>Bien hypothéqué{analyse.infos_specifiques.banque_hypotheque ? ` (${analyse.infos_specifiques.banque_hypotheque})` : ''}</span></div>}
+                  {analyse.infos_specifiques.mode_paiement === 'credit_bancaire' && <div className="flex items-center gap-2"><CreditCard size={13} className="text-blue-500" /><span>Crédit bancaire{analyse.infos_specifiques.banque_credit ? ` (${analyse.infos_specifiques.banque_credit})` : ''}</span></div>}
+                  {analyse.infos_specifiques.condition_suspensive && <div className="flex items-center gap-2"><AlertTriangle size={13} className="text-amber-500" /><span>Condition suspensive</span></div>}
+                  {analyse.infos_specifiques.capital_social && <div className="flex items-center gap-2"><Building2 size={13} className="text-indigo-500" /><span>Capital : {Number(analyse.infos_specifiques.capital_social).toLocaleString('fr-FR')} FCFA</span></div>}
+                  {analyse.infos_specifiques.siege_social && <div className="flex items-center gap-2"><Building2 size={13} className="text-muted" /><span>Siège : {analyse.infos_specifiques.siege_social}</span></div>}
+                </div>
+              </div>
+            )}
+
+            {analyse.documents_requis?.length > 0 && (
+              <div className="py-3">
+                <p className="text-sm text-muted mb-1"><FileText size={13} className="inline mr-1" />{analyse.documents_requis.length} documents requis</p>
+                <p className="text-xs text-muted">{analyse.documents_requis.join(', ')}</p>
+              </div>
+            )}
+          </div>
+
+          {!analyse.type_acte && (
+            <div className="card border-amber-200 bg-amber-50/30">
+              <p className="text-sm text-amber-700 mb-3">Type d'acte non identifié. Sélectionnez-le :</p>
+              <div className="flex flex-wrap gap-2">
+                {Object.entries(TYPES_LABELS).map(([k, v]) => (
+                  <button key={k} onClick={() => setAnalyse(a => ({ ...a, type_acte: k }))} className="text-xs px-3 py-1.5 rounded-lg border border-border hover:border-gold hover:bg-gold/5">{v}</button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div>
+            <p className="text-xs font-medium text-muted mb-1.5">Quelque chose à corriger ?</p>
+            <div className="flex gap-2">
+              <input value={correction} onChange={e => setCorrection(e.target.value)} className="input-field flex-1 text-sm" placeholder="Ajouter, corriger ou préciser..." onKeyDown={e => e.key === 'Enter' && corriger()} />
+              {correction && <button onClick={corriger} disabled={analyzing} className="btn-secondary text-sm px-4 disabled:opacity-50">{analyzing ? '...' : 'Corriger'}</button>}
+            </div>
+          </div>
+
+          {error && <p className="text-red-500 text-sm text-center">{error}</p>}
+
+          <div className="flex gap-3">
+            <button onClick={() => setPhase(1)} className="btn-secondary flex-1">← Modifier</button>
+            <button onClick={creerDossier} disabled={creating || !analyse.type_acte} className="btn-primary flex-1 py-3 disabled:opacity-50">
+              {creating ? <><Loader2 size={16} className="inline animate-spin mr-2" />Création...</> : '✅ Créer ce dossier'}
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

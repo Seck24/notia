@@ -9,6 +9,7 @@ import Onboarding from './pages/onboarding/Onboarding'
 import Dashboard from './pages/Dashboard'
 import ListeDossiers from './pages/dossiers/ListeDossiers'
 import NouveauDossier from './pages/dossiers/NouveauDossier'
+import NouveauDossierFormulaire from './pages/dossiers/NouveauDossierFormulaire'
 import DetailDossier from './pages/dossiers/DetailDossier'
 import UploadClient from './pages/upload/UploadClient'
 import Configuration from './pages/Configuration'
@@ -37,6 +38,7 @@ export default function App() {
           <Route path="/clients/:id" element={<FicheClient />} />
           <Route path="/dossiers" element={<ListeDossiers />} />
           <Route path="/dossiers/nouveau" element={<NouveauDossier />} />
+          <Route path="/dossiers/nouveau/formulaire" element={<NouveauDossierFormulaire />} />
           <Route path="/dossiers/:id" element={<DetailDossier />} />
           <Route path="/configuration" element={<Configuration />} />
         </Route>
